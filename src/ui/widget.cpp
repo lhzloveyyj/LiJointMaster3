@@ -547,7 +547,9 @@ void Widget::buildUi()
         "QPushButton:hover{background:%8;}"
         "QPushButton:pressed{background:%8;}"
         "QPushButton:checked{background:%8;border-color:%8;}"
-        "QLineEdit,QComboBox{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %6, stop:1 %4);color:%1;border:2px solid %3;border-radius:12px;padding:0 28px 0 10px;min-height:28px;}"
+        "QLineEdit,QComboBox{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %6, stop:1 %4);color:%1;border:2px solid %3;border-radius:12px;min-height:28px;}"
+        "QLineEdit{padding:0 8px 0 10px;}"
+        "QComboBox{padding:0 28px 0 10px;}"
         "QComboBox::drop-down{subcontrol-origin:padding;subcontrol-position:top right;width:24px;border:none;}"
         "QComboBox::down-arrow{image:none;width:0px;height:0px;}"
         "QComboBox QAbstractItemView{background:%4;color:%1;border:2px solid %3;border-radius:10px;selection-background-color:%5;selection-color:%1;}"
@@ -632,18 +634,20 @@ void Widget::buildUi()
 
     // Left panel
     auto *left = makeCard(th.panelBg, th.border, 12);
-    left->setFixedWidth(186);
+    left->setFixedWidth(226);
     auto *leftV = new QVBoxLayout(left);
     leftV->setContentsMargins(6, 6, 6, 6);
     leftV->setSpacing(6);
 
     auto *serialCard = new QGroupBox(QStringLiteral("串口配置"));
     auto *sg = new QGridLayout(serialCard);
+    sg->setContentsMargins(8, 10, 8, 8);
     sg->setHorizontalSpacing(4);
     sg->setVerticalSpacing(4);
 
     auto addRow = [&](int r, const QString &n, QWidget *w) {
         auto *l = new QLabel(n);
+        l->setMinimumWidth(42);
         l->setStyleSheet(QString("color:%1;").arg(th.subText));
         sg->addWidget(l, r, 0);
         sg->addWidget(w, r, 1);
@@ -654,6 +658,11 @@ void Widget::buildUi()
     auto *db = makeCombo(); db->addItems({"8", "7"});
     auto *sb = makeCombo(); sb->addItems({"1", "1.5", "2"});
     auto *par = makeCombo(); par->addItems({"None", "Even", "Odd"});
+    com->setMinimumWidth(98);
+    baud->setMinimumWidth(98);
+    db->setMinimumWidth(98);
+    sb->setMinimumWidth(98);
+    par->setMinimumWidth(98);
 
     addRow(0, QStringLiteral("串口"), com);
     addRow(1, QStringLiteral("波特率"), baud);
@@ -814,12 +823,15 @@ void Widget::buildUi()
 
     auto *bottomCard = makeCard(th.cardBg, th.border, 10);
     auto *bottomL = new QHBoxLayout(bottomCard);
-    bottomL->setContentsMargins(6, 6, 6, 6);
-    bottomL->setSpacing(6);
+    bottomL->setContentsMargins(4, 6, 4, 6);
+    bottomL->setSpacing(3);
 
     auto *reserve = new QGroupBox(QStringLiteral("预留参数框"));
-    reserve->setFixedWidth(180);
+    reserve->setFixedWidth(166);
+    reserve->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     auto *rv = new QVBoxLayout(reserve);
+    rv->setContentsMargins(8, 8, 8, 8);
+    rv->setSpacing(6);
     auto *zeroCalibBtn = makeBtn(QStringLiteral("零电位校准"), accentBrush, 28);
     zeroCalibBtn->setCheckable(true);
     rv->addWidget(zeroCalibBtn);
@@ -830,11 +842,19 @@ void Widget::buildUi()
     rv->addLayout(zr); rv->addLayout(er); rv->addStretch();
 
     auto *control = new QGroupBox(QStringLiteral("控制模式选择"));
-    control->setMinimumWidth(300);
+    control->setFixedWidth(290);
+    control->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     auto *cv = new QVBoxLayout(control);
+    cv->setContentsMargins(8, 8, 8, 8);
+    cv->setSpacing(6);
     auto *cmode = makeCombo(); cmode->addItems({QStringLiteral("开环模式"), QStringLiteral("电流环"), QStringLiteral("速度环"), QStringLiteral("位置环")});
-    cv->addWidget(cmode);
+    cmode->setFixedWidth(216);
+    cv->addWidget(cmode, 0, Qt::AlignLeft);
     auto *wg = new QGridLayout;
+    wg->setContentsMargins(0, 0, 0, 0);
+    wg->setHorizontalSpacing(6);
+    wg->setVerticalSpacing(6);
+    wg->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     const QList<QPair<int, int>> waveCmds = {
         {static_cast<int>(SerialCommand::CMD_MECHANICALANGLE), static_cast<int>(SerialCommand::CMD_MECHANICALANGLE_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_ADC), static_cast<int>(SerialCommand::CMD_ADC_CLOSE)},
@@ -861,7 +881,7 @@ void Widget::buildUi()
     const QString trendCheckedHover = trendAccent.isValid() ? trendAccent.lighter(108).name(QColor::HexRgb) : QStringLiteral("#62b4ff");
     const QString trendCheckedPress = trendAccent.isValid() ? trendAccent.darker(118).name(QColor::HexRgb) : QStringLiteral("#3a8fdf");
     const QString trendStyle = QString(
-        "QPushButton{background:%1;color:#eaf2ff;border:1px solid %2;border-radius:7px;padding:2px 10px;}"
+        "QPushButton{background:%1;color:#eaf2ff;border:1px solid %2;border-radius:7px;padding:2px 6px;}"
         "QPushButton:hover{background:%3;border-color:%2;}"
         "QPushButton:pressed{background:%4;border-color:%2;padding-top:4px;padding-left:12px;padding-right:8px;padding-bottom:0px;}"
         "QPushButton:checked{background:%5;color:#ffffff;border:1px solid %5;}"
@@ -872,6 +892,7 @@ void Widget::buildUi()
         auto *b = makeBtn(waves[i], "#3f4f6d", 30);
         b->setCheckable(true);
         b->setStyleSheet(trendStyle);
+        b->setFixedWidth(88);
         m_trendOpenCmd.insert(b, waveCmds[i].first);
         m_trendCloseCmd.insert(b, waveCmds[i].second);
         trendButtons.push_back(b);
@@ -880,10 +901,14 @@ void Widget::buildUi()
     cv->addLayout(wg);
 
     auto *target = new QGroupBox(QStringLiteral("目标值设置"));
-    target->setFixedWidth(190);
+    target->setFixedWidth(180);
+    target->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     auto *tv = new QVBoxLayout(target);
-    const int kTargetInputW = 96;
-    const int kTargetBtnW = 66;
+    tv->setContentsMargins(6, 6, 6, 6);
+    tv->setSpacing(6);
+    const int kTargetInputW = 77;
+    const int kTargetBtnW = 68;
+    const int kTargetGapW = 6;
     QStringList tnames = {QStringLiteral("设置Uq"), QStringLiteral("设置Ud"), QStringLiteral("设置Iq"), QStringLiteral("设置Id"), QStringLiteral("设置速度"), QStringLiteral("设置位置")};
     const QList<int> tcmds = {
         static_cast<int>(SerialCommand::CMD_SETUQ),
@@ -895,14 +920,17 @@ void Widget::buildUi()
     };
     for (int i = 0; i < tnames.size(); ++i) {
         auto *r = new QHBoxLayout;
-        r->setSpacing(6);
+        r->setSpacing(0);
         auto *edit = makeInput("0.0");
         auto *btn = makeBtn(tnames[i], accentBrush, 28);
+        auto *gap = new QWidget;
+        gap->setFixedWidth(kTargetGapW);
+        gap->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         edit->setFixedWidth(kTargetInputW);
         btn->setFixedWidth(kTargetBtnW);
         r->addWidget(edit);
+        r->addWidget(gap);
         r->addWidget(btn);
-        r->addStretch();
         tv->addLayout(r);
         m_commandEdits.insert(tcmds[i], edit);
         connect(btn, &QPushButton::clicked, this, [this, edit, i, tcmds]() {
@@ -919,29 +947,35 @@ void Widget::buildUi()
     tv->addStretch();
 
     auto *pid = new QGroupBox(QStringLiteral("PID 参数设置"));
-    auto *pg = new QGridLayout(pid);
-    // 让三列更“贴紧”：收小边距与间距，且保持顶部对齐
-    pg->setContentsMargins(4, 2, 4, 4);
-    pg->setHorizontalSpacing(6);
-    pg->setVerticalSpacing(4);
-    const int kPidInputW = 58;
+    pid->setMinimumWidth(418);
+    pid->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    auto *pg = new QHBoxLayout(pid);
+    pg->setContentsMargins(2, 2, 2, 4);
+    pg->setSpacing(3);
+    const int kPidInputW = 80;
     const int kPidBtnW = 68;
+    const int kPidGapW = 6;
     auto addPid = [&](int col, const QString &titleText, const QStringList &rows, const QList<int> &cmds) {
+        Q_UNUSED(col);
         auto *box = new QGroupBox(titleText);
+        box->setFixedWidth(176);
         box->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         auto *v = new QVBoxLayout(box);
-        v->setContentsMargins(6, 6, 6, 6);
+        v->setContentsMargins(4, 6, 4, 6);
         v->setSpacing(6);
         for (int i = 0; i < rows.size(); ++i) {
             auto *h = new QHBoxLayout;
-            h->setSpacing(6);
+            h->setSpacing(0);
             auto *edit = makeInput("0.0");
             auto *btn = makeBtn(rows[i], accentBrush, 28);
+            auto *gap = new QWidget;
+            gap->setFixedWidth(kPidGapW);
+            gap->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
             edit->setFixedWidth(kPidInputW);
             btn->setFixedWidth(kPidBtnW);
             h->addWidget(edit);
+            h->addWidget(gap);
             h->addWidget(btn);
-            h->addStretch();
             v->addLayout(h);
             m_commandEdits.insert(cmds[i], edit);
             connect(btn, &QPushButton::clicked, this, [this, edit, i, cmds]() {
@@ -955,7 +989,7 @@ void Widget::buildUi()
                 m_serial->sendFloatCommand(cmds[i], QLocale().toDouble(edit->text()));
             });
         }
-        pg->addWidget(box, 0, col, Qt::AlignTop);
+        pg->addWidget(box, 0, Qt::AlignTop);
     };
     addPid(0, QStringLiteral("电流环PID参数整定"), {QStringLiteral("设置KP"), QStringLiteral("设置KI"), QStringLiteral("输出限制")},
            {static_cast<int>(SerialCommand::CMD_SETIQPIDKP), static_cast<int>(SerialCommand::CMD_SETIQPIDKI), static_cast<int>(SerialCommand::CMD_SETIQPIDOUT)});
@@ -965,7 +999,8 @@ void Widget::buildUi()
            {static_cast<int>(SerialCommand::CMD_SETLOCALPIDKP), static_cast<int>(SerialCommand::CMD_SETLOCALPIDKD), static_cast<int>(SerialCommand::CMD_SETLOCALPIDOUT)});
 
     bottomL->addWidget(reserve);
-    bottomL->addWidget(control, 1);
+    bottomL->addWidget(control);
+    bottomL->addSpacing(2);
     bottomL->addWidget(target);
     bottomL->addWidget(pid, 1);
 
