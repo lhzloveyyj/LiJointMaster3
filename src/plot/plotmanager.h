@@ -4,7 +4,7 @@
 #include <QObject>
 #include <QMap>
 #include <QTimer>
-#include "qcustomplot.h"
+#include "third_party/qcustomplot/qcustomplot.h"
 
 class PlotManager : public QObject
 {

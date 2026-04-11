@@ -13,18 +13,20 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets SerialPort PrintSuppor
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets SerialPort PrintSupport)
 
 set(PROJECT_SOURCES
-        main.cpp
-        widget.cpp
-        widget.h
-        widget.ui
-        qcustomplot.cpp
-        qcustomplot.h
-        plotmanager.cpp
-        plotmanager.h
+        src/app/main.cpp
+        src/ui/widget.cpp
+        src/ui/widget.h
+        src/ui/widget.ui
+        src/plot/plotmanager.cpp
+        src/plot/plotmanager.h
         src/serial/serialmanager.cpp
         src/serial/serialmanager.h
         src/serial/serialcommand.h
+        src/third_party/qcustomplot/qcustomplot.cpp
+        src/third_party/qcustomplot/qcustomplot.h
 )
+
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${PROJECT_SOURCES})
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(LiJointMaster3
@@ -48,6 +50,10 @@ else()
         )
     endif()
 endif()
+
+target_include_directories(LiJointMaster3 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 
 target_link_libraries(LiJointMaster3 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::SerialPort Qt${QT_VERSION_MAJOR}::PrintSupport)
 

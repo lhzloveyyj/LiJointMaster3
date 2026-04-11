@@ -1,9 +1,9 @@
 ﻿#include "widget.h"
 #include "./ui_widget.h"
-#include "plotmanager.h"
-#include "qcustomplot.h"
-#include "src/serial/serialcommand.h"
-#include "src/serial/serialmanager.h"
+#include "plot/plotmanager.h"
+#include "third_party/qcustomplot/qcustomplot.h"
+#include "serial/serialcommand.h"
+#include "serial/serialmanager.h"
 
 #include <QComboBox>
 #include <QColor>
