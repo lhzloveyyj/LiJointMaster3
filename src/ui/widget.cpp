@@ -653,7 +653,7 @@ void Widget::buildUi()
         sg->addWidget(w, r, 1);
     };
 
-    auto *com = makeCombo(); com->addItems({"COM6", "COM5"});
+    auto *com = makeCombo();
     auto *baud = makeCombo(); baud->addItems({"4000000", "2000000", "921600", "115200"});
     auto *db = makeCombo(); db->addItems({"8", "7"});
     auto *sb = makeCombo(); sb->addItems({"1", "1.5", "2"});
@@ -1093,6 +1093,7 @@ void Widget::buildUi()
             m_serial->disconnectPort();
             return;
         }
+        m_serial->refreshPorts();
         const QString port = m_portCombo ? m_portCombo->currentText() : QString();
         const int baud = m_baudCombo ? m_baudCombo->currentText().toInt() : 115200;
         m_serial->connectPort(port, baud);
@@ -1282,6 +1283,10 @@ void Widget::buildUi()
     if (m_serial) {
         m_serial->setRxLogEnabled(false);
         m_serial->refreshPorts();
+        if (m_portCombo) {
+            m_portCombo->clear();
+            m_portCombo->addItems(m_serial->availablePorts());
+        }
     }
 
     // 设置对话框：按参考工程改为同页“设置 + 主题与颜色 + 开发者留言”布局

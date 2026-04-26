@@ -9,8 +9,22 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets SerialPort PrintSupport)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets SerialPort PrintSupport)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets PrintSupport)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets PrintSupport)
+find_package(Qt${QT_VERSION_MAJOR} QUIET COMPONENTS SerialPort)
+
+set(LIJOINT_QT_LIBS
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::PrintSupport
+)
+
+if(TARGET Qt${QT_VERSION_MAJOR}::SerialPort)
+    list(APPEND LIJOINT_QT_LIBS Qt${QT_VERSION_MAJOR}::SerialPort)
+    set(LIJOINT_HAS_SERIALPORT ON)
+else()
+    set(LIJOINT_HAS_SERIALPORT OFF)
+    message(WARNING "Qt SerialPort was not found. Building LiJointMaster3 with a disabled serial backend.")
+endif()
 
 set(PROJECT_SOURCES
         src/app/main.cpp
@@ -55,7 +69,11 @@ target_include_directories(LiJointMaster3 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(LiJointMaster3 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::SerialPort Qt${QT_VERSION_MAJOR}::PrintSupport)
+target_link_libraries(LiJointMaster3 PRIVATE ${LIJOINT_QT_LIBS})
+
+target_compile_definitions(LiJointMaster3 PRIVATE
+    LIJOINT_HAS_SERIALPORT=$<BOOL:${LIJOINT_HAS_SERIALPORT}>
+)
 
 if(MINGW)
     target_compile_options(LiJointMaster3 PRIVATE -Wa,-mbig-obj)

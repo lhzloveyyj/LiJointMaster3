@@ -5,8 +5,15 @@
 #include <QByteArray>
 #include <QVariantList>
 
-class QSerialPort;
+#ifndef LIJOINT_HAS_SERIALPORT
+#define LIJOINT_HAS_SERIALPORT 0
+#endif
+
 class QTimer;
+
+#if LIJOINT_HAS_SERIALPORT
+class QSerialPort;
+#endif
 
 class SerialManager : public QObject
 {
@@ -60,7 +67,9 @@ private:
     void setMosTemperature(double temperature);
     void setActiveTrendCommand(int command);
 
+#if LIJOINT_HAS_SERIALPORT
     QSerialPort *m_serialPort;
+#endif
     QStringList m_availablePorts;
     bool m_motorConnected;
     QString m_statusMessage;

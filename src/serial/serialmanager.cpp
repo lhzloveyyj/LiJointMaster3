@@ -1,9 +1,14 @@
 ﻿#include "serialmanager.h"
 
-#include <QSerialPort>
-#include <QSerialPortInfo>
+#include <QDir>
+#include <QFileInfo>
 #include <QTimer>
 #include <QtGlobal>
+
+#if LIJOINT_HAS_SERIALPORT
+#include <QSerialPort>
+#include <QSerialPortInfo>
+#endif
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -17,17 +22,36 @@
 namespace {
 // 回包载荷保护上限，防止异常帧撑爆解析逻辑
 constexpr int kMaxPayloadLen = 128;
+
+QString normalizedPortName(const QString &portName)
+{
+    if (portName.startsWith(QStringLiteral("/dev/"))) {
+        return QFileInfo(portName).fileName();
+    }
+    return portName;
+}
+
+bool containsPort(const QStringList &ports, const QString &portName)
+{
+    const QString normalized = normalizedPortName(portName);
+    return ports.contains(portName)
+        || ports.contains(normalized)
+        || ports.contains(QStringLiteral("/dev/") + normalized);
+}
 }
 
 SerialManager::SerialManager(QObject *parent)
     : QObject(parent)
+#if LIJOINT_HAS_SERIALPORT
     , m_serialPort(new QSerialPort(this))
+#endif
     , m_motorConnected(false)
     , m_mosTemperature(0.0)
     , m_activeTrendCommand(0)
     , m_portWatchTimer(new QTimer(this))
     , m_rxLogEnabled(false)
 {
+#if LIJOINT_HAS_SERIALPORT
     connect(m_serialPort, &QSerialPort::readyRead, this, &SerialManager::readSerialData);
 
     connect(m_serialPort, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
@@ -36,6 +60,7 @@ SerialManager::SerialManager(QObject *parent)
         }
         setStatusMessage(QStringLiteral("串口错误: %1").arg(m_serialPort->errorString()));
     });
+#endif
 
     connect(m_portWatchTimer, &QTimer::timeout, this, [this]() {
         updateAvailablePorts(false);
@@ -58,7 +83,11 @@ QStringList SerialManager::availablePorts() const
 
 bool SerialManager::isConnected() const
 {
+#if LIJOINT_HAS_SERIALPORT
     return m_serialPort->isOpen();
+#else
+    return false;
+#endif
 }
 
 bool SerialManager::isMotorConnected() const
@@ -88,14 +117,52 @@ void SerialManager::refreshPorts()
 
 void SerialManager::updateAvailablePorts(bool manualRefresh)
 {
-    // 轮询当前系统串口列表
-    QStringList ports;
-    const auto portInfos = QSerialPortInfo::availablePorts();
-    for (const QSerialPortInfo &info : portInfos) {
-        ports << info.portName();
+#if !LIJOINT_HAS_SERIALPORT
+    if (!m_availablePorts.isEmpty()) {
+        m_availablePorts.clear();
+        emit availablePortsChanged();
     }
 
-    if (isConnected() && !ports.contains(m_serialPort->portName())) {
+    if (manualRefresh) {
+        setStatusMessage(QStringLiteral("当前构建未启用 Qt SerialPort，无法枚举串口"));
+    }
+    return;
+#else
+    // 轮询当前系统串口列表
+    QStringList preferredPorts;
+    QStringList otherPorts;
+    const auto portInfos = QSerialPortInfo::availablePorts();
+    for (const QSerialPortInfo &info : portInfos) {
+        const QString location = info.systemLocation().isEmpty() ? info.portName() : info.systemLocation();
+        if (location.contains(QStringLiteral("ttyUSB")) || location.contains(QStringLiteral("ttyACM"))) {
+            preferredPorts << location;
+        } else {
+            otherPorts << location;
+        }
+    }
+
+#ifdef Q_OS_LINUX
+    const QStringList fallbackFilters{
+        QStringLiteral("ttyACM*"),
+        QStringLiteral("ttyUSB*")
+    };
+    const auto fallbackEntries = QDir(QStringLiteral("/dev")).entryInfoList(
+        fallbackFilters,
+        QDir::System | QDir::Files | QDir::NoSymLinks,
+        QDir::Name);
+    for (const QFileInfo &entry : fallbackEntries) {
+        const QString location = entry.absoluteFilePath();
+        if (!preferredPorts.contains(location) && !otherPorts.contains(location)) {
+            preferredPorts << location;
+        }
+    }
+#endif
+
+    preferredPorts.sort();
+    otherPorts.sort();
+    const QStringList ports = preferredPorts + otherPorts;
+
+    if (isConnected() && !containsPort(ports, m_serialPort->portName())) {
         // 已连接串口被拔出：执行自动断连与状态复位
         const QString removedPort = m_serialPort->portName();
         m_serialPort->close();
@@ -119,10 +186,17 @@ void SerialManager::updateAvailablePorts(bool manualRefresh)
     if (manualRefresh) {
         setStatusMessage(QStringLiteral("已刷新串口列表"));
     }
+#endif
 }
 
 bool SerialManager::connectPort(const QString &portName, int baudRate)
 {
+#if !LIJOINT_HAS_SERIALPORT
+    Q_UNUSED(portName);
+    Q_UNUSED(baudRate);
+    setStatusMessage(QStringLiteral("打开串口失败: 当前 Qt 环境缺少 SerialPort 模块"));
+    return false;
+#else
     // 串口参数固定为 8N1，无流控（与原项目一致）
     if (portName.isEmpty()) {
         setStatusMessage(QStringLiteral("串口名不能为空"));
@@ -133,7 +207,7 @@ bool SerialManager::connectPort(const QString &portName, int baudRate)
         disconnectPort();
     }
 
-    m_serialPort->setPortName(portName);
+    m_serialPort->setPortName(normalizedPortName(portName));
     m_serialPort->setBaudRate(baudRate);
     m_serialPort->setDataBits(QSerialPort::Data8);
     m_serialPort->setParity(QSerialPort::NoParity);
@@ -152,12 +226,20 @@ bool SerialManager::connectPort(const QString &portName, int baudRate)
         return true;
     }
 
-    setStatusMessage(QStringLiteral("连接失败: %1").arg(m_serialPort->errorString()));
+    setStatusMessage(QStringLiteral("连接失败: %1 (%2)").arg(m_serialPort->errorString(), portName));
     return false;
+#endif
 }
 
 void SerialManager::disconnectPort()
 {
+#if !LIJOINT_HAS_SERIALPORT
+    m_rxBuffer.clear();
+    setMotorConnected(false);
+    setMosTemperature(0.0);
+    setActiveTrendCommand(0);
+    return;
+#else
     if (!isConnected()) {
         return;
     }
@@ -169,6 +251,7 @@ void SerialManager::disconnectPort()
     setActiveTrendCommand(0);
     emit connectedChanged();
     setStatusMessage(QStringLiteral("串口已断开"));
+#endif
 }
 
 bool SerialManager::connectMotor()
@@ -182,6 +265,11 @@ bool SerialManager::connectMotor()
 
 bool SerialManager::sendText(const QString &text)
 {
+#if !LIJOINT_HAS_SERIALPORT
+    Q_UNUSED(text);
+    setStatusMessage(QStringLiteral("发送失败: 当前 Qt 环境缺少 SerialPort 模块"));
+    return false;
+#else
     if (!isConnected()) {
         setStatusMessage(QStringLiteral("发送失败: 串口未连接"));
         return false;
@@ -196,10 +284,17 @@ bool SerialManager::sendText(const QString &text)
 
     setStatusMessage(QStringLiteral("已发送 %1 字节").arg(written));
     return true;
+#endif
 }
 
 bool SerialManager::sendFloatCommand(int command, double value)
 {
+#if !LIJOINT_HAS_SERIALPORT
+    Q_UNUSED(command);
+    Q_UNUSED(value);
+    setStatusMessage(QStringLiteral("发送失败: 当前 Qt 环境缺少 SerialPort 模块"));
+    return false;
+#else
     // 命令帧固定 8 字节：
     // [HEAD][CMD][DATA0][DATA1][DATA2][DATA3][CHECKSUM][TAIL]
     if (!isConnected()) {
@@ -245,6 +340,7 @@ bool SerialManager::sendFloatCommand(int command, double value)
 
     setStatusMessage(QStringLiteral("已发送命令 0x%1").arg(command, 2, 16, QLatin1Char('0')).toUpper());
     return true;
+#endif
 }
 
 void SerialManager::playSystemAlert()
@@ -303,6 +399,9 @@ void SerialManager::setActiveTrendCommand(int command)
 
 void SerialManager::readSerialData()
 {
+#if !LIJOINT_HAS_SERIALPORT
+    return;
+#else
     // readyRead 时先收原始字节，再做协议帧解析
     const QByteArray bytes = m_serialPort->readAll();
     if (bytes.isEmpty()) {
@@ -315,6 +414,7 @@ void SerialManager::readSerialData()
 
     m_rxBuffer.append(bytes);
     parseRxBuffer();
+#endif
 }
 
 void SerialManager::parseRxBuffer()
