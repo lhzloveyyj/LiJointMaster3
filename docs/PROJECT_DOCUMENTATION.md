@@ -229,6 +229,8 @@ LiJointMaster3/
 
 界面中存在“母线电压”输入框，但当前没有绑定发送命令逻辑，也没有与回包绑定。
 
+波形监控区域另有“母线ADC”按钮，用于订阅下位机回传的母线电压 ADC 原始值。该功能不写入参数，只控制曲线数据流开关。
+
 因此该项目前属于界面预留字段。
 
 ## 9. 图表区功能
@@ -319,6 +321,7 @@ LiJointMaster3/
 - 电流环输出
 - 速度环输出
 - 位置环输出
+- 母线 ADC 原始值
 
 ### 10.1 单选订阅机制
 
@@ -348,6 +351,7 @@ LiJointMaster3/
 - `CMD_LOCAL / CMD_LOCAL_CLOSE`
 - `CMD_SPEEDOUT / CMD_SPEEDOUT_CLOSE`
 - `CMD_LOCALOUT / CMD_LOCALOUT_CLOSE`
+- `CMD_ADCVBUS / CMD_ADCVBUS_CLOSE`
 
 ### 10.3 图表数据追加规则
 
@@ -365,6 +369,9 @@ LiJointMaster3/
 - 速度环输出 -> `speedOut`
 - 位置 -> `local`
 - 位置环输出 -> `localOut`
+- 母线 ADC 原始值 -> `adcvbus`
+
+`CMD_MOSTEMP` 仍用于 MOS 温度显示；`CMD_ADCVBUS` 独立用于母线电压 ADC 原始值曲线，避免两类数据复用同一个命令字。
 
 ## 11. 零电位校准功能
 
@@ -626,6 +633,8 @@ LiJointMaster3/
 - `CMD_SETIQ`
 - `CMD_SETID`
 - `CMD_MOSTEMP`
+- `CMD_ADCVBUS`
+- `CMD_ADCVBUS_CLOSE`
 - `CMD_SETUD`
 
 ### 17.3 控制模式与速度位置控制
@@ -668,6 +677,7 @@ LiJointMaster3/
 - 电机连接状态同步
 - 串口列表同步
 - MOS 温度同步
+- 母线 ADC 原始值曲线同步
 - 连接电机后的参数回填
 - 零电位校准结果回填
 - 图表采样数据实时同步

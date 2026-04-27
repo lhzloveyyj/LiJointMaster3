@@ -415,6 +415,7 @@ void Widget::setupPlotGraphs()
     m_plotManager->addGraph("speedOut", Qt::magenta);
     m_plotManager->addGraph("local", Qt::blue);
     m_plotManager->addGraph("localOut", Qt::yellow);
+    m_plotManager->addGraph("adcvbus", Qt::green);
 }
 
 void Widget::appendTrendValues(int command, const QVariantList &values)
@@ -488,6 +489,11 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
         break;
     case SerialCommand::CMD_LOCALOUT:
         m_plotManager->appendData("localOut", valueAt(0));
+        break;
+    case SerialCommand::CMD_ADCVBUS:
+        if (m_serial && m_serial->property("activeTrendCommand").toInt() == static_cast<int>(SerialCommand::CMD_ADCVBUS)) {
+            m_plotManager->appendData("adcvbus", valueAt(0));
+        }
         break;
     default:
         break;
@@ -868,10 +874,11 @@ void Widget::buildUi()
         {static_cast<int>(SerialCommand::CMD_LOCAL), static_cast<int>(SerialCommand::CMD_LOCAL_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_IQ_ID), static_cast<int>(SerialCommand::CMD_IQ_ID_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_SPEEDOUT), static_cast<int>(SerialCommand::CMD_SPEEDOUT_CLOSE)},
-        {static_cast<int>(SerialCommand::CMD_LOCALOUT), static_cast<int>(SerialCommand::CMD_LOCALOUT_CLOSE)}
+        {static_cast<int>(SerialCommand::CMD_LOCALOUT), static_cast<int>(SerialCommand::CMD_LOCALOUT_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_ADCVBUS), static_cast<int>(SerialCommand::CMD_ADCVBUS_CLOSE)}
     };
     QList<QPushButton *> trendButtons;
-    QStringList waves = {QStringLiteral("机械角度"), QStringLiteral("三相ADC"), QStringLiteral("IAlpha_B..."), QStringLiteral("三相电压..."), QStringLiteral("三相电流"), QStringLiteral("IQ_ID"), QStringLiteral("三相SVP..."), QStringLiteral("UAlpha_B..."), QStringLiteral("速度"), QStringLiteral("位置"), QStringLiteral("电流环输出"), QStringLiteral("速度环输出"), QStringLiteral("位置环输出")};
+    QStringList waves = {QStringLiteral("机械角度"), QStringLiteral("三相ADC"), QStringLiteral("IAlpha_B..."), QStringLiteral("三相电压..."), QStringLiteral("三相电流"), QStringLiteral("IQ_ID"), QStringLiteral("三相SVP..."), QStringLiteral("UAlpha_B..."), QStringLiteral("速度"), QStringLiteral("位置"), QStringLiteral("电流环输出"), QStringLiteral("速度环输出"), QStringLiteral("位置环输出"), QStringLiteral("母线ADC")};
     const QColor trendAccent(accentBrush);
     const QString trendNormalBg = "#1f2b41";
     const QString trendNormalBorder = "#5b76a3";
@@ -1077,7 +1084,10 @@ void Widget::buildUi()
             btn->setChecked(false);
             btn->blockSignals(false);
             if (m_serial && m_serial->isConnected()) {
-                m_serial->sendFloatCommand(m_trendCloseCmd.value(btn, -1), 0.0);
+                const int closeCmd = m_trendCloseCmd.value(btn, -1);
+                if (closeCmd > 0) {
+                    m_serial->sendFloatCommand(closeCmd, 0.0);
+                }
             }
         }
         if (m_serial) {
@@ -1190,12 +1200,17 @@ void Widget::buildUi()
                     other->blockSignals(true);
                     other->setChecked(false);
                     other->blockSignals(false);
-                    m_serial->sendFloatCommand(m_trendCloseCmd.value(other, -1), 0.0);
+                    const int otherCloseCmd = m_trendCloseCmd.value(other, -1);
+                    if (otherCloseCmd > 0) {
+                        m_serial->sendFloatCommand(otherCloseCmd, 0.0);
+                    }
                 }
                 m_serial->sendFloatCommand(openCmd, 0.0);
                 m_serial->setProperty("activeTrendCommand", openCmd);
             } else {
-                m_serial->sendFloatCommand(closeCmd, 0.0);
+                if (closeCmd > 0) {
+                    m_serial->sendFloatCommand(closeCmd, 0.0);
+                }
                 if (m_serial->property("activeTrendCommand").toInt() == openCmd) {
                     m_serial->setProperty("activeTrendCommand", 0);
                 }

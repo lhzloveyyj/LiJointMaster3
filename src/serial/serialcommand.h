@@ -69,4 +69,6 @@ enum class SerialCommand : uint8_t
     CMD_SETIQPIDOUT = 0x43,
     CMD_SETSPEEDPIDOUT = 0x44,
     CMD_SETLOCALPIDOUT = 0x45,
+    CMD_ADCVBUS = 0x46,
+    CMD_ADCVBUS_CLOSE = 0x47,
 };
