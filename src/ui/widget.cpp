@@ -5,6 +5,30 @@
 #include "serial/serialcommand.h"
 #include "serial/serialmanager.h"
 
+/**
+ * @file widget.cpp
+ * @brief FOC 电机上位机主窗口实现
+ *
+ * 这是 LiJointMaster3 最大的源文件（约 1670 行），负责：
+ *
+ * 1. UI 构建：无边框窗口、6 主题 × 4 强调色切换、全动态布局
+ * 2. 信号绑定：串口通信 ↔ 界面控件的双向数据绑定
+ * 3. 协议路由：将串口回包解析结果分发到图表、参数回填、状态更新
+ * 4. 交互保护：未开串口时阻止操作、波形互斥、自动断连状态复位
+ *
+ * 布局结构：
+ * ┌──────────────────────────────────────────────┐
+ * │              自定义标题栏                      │
+ * ├──────────┬───────────────────────────────────┤
+ * │ 左侧面板  │       图表区 (QCustomPlot)        │
+ * │ 串口配置  │                                   │
+ * │ 电机参数  ├───────────────────────────────────┤
+ * │          │  底部调试台（零位/控制模式/PID等）  │
+ * └──────────┴───────────────────────────────────┘
+ *
+ * 注意：主题切换时 buildUi() 会被重新调用，完全重建界面。
+ */
+
 #include <QComboBox>
 #include <QColor>
 #include <QDesktopServices>
@@ -35,6 +59,15 @@
 #include <QWindow>
 
 namespace {
+// ============================================================================
+// 匿名命名空间：辅助函数和工具类
+// ============================================================================
+
+/**
+ * @brief 格式化数值，去掉无意义的末尾零和负零
+ *
+ * 例如：123.400000 → "123.4"，0.000000 → "0"
+ */
 QString formatCompactNumber(double value, int decimals = 6)
 {
     QString s = QString::number(value, 'f', decimals);
@@ -50,6 +83,18 @@ QString formatCompactNumber(double value, int decimals = 6)
     return s;
 }
 
+/**
+ * @brief 生成 QPushButton 的渐变样式表
+ *
+ * 根据基础颜色自动计算 normal/hover/pressed/checked 四种状态的颜色，
+ * 每个状态使用轻微的亮度变化和渐变效果。
+ *
+ * @param bg     基础背景色（十六进制，如 "#3f72b8"）
+ * @param text   文字颜色
+ * @param border 边框颜色
+ * @param radius 圆角半径
+ * @return 完整的 QPushButton 样式表字符串
+ */
 QString makeButtonStyle(const QString &bg, const QString &text, const QString &border, int radius = 6)
 {
     QColor base(bg);
@@ -82,6 +127,14 @@ QString makeButtonStyle(const QString &bg, const QString &text, const QString &b
         .arg(hoverTop, hoverBottom, pressTop, pressBottom, checkedTop, checkedBottom, checkedHoverTop, checkedHoverBottom, checkedPressTop, checkedPressBottom);
 }
 
+/**
+ * @brief 弹出"串口未打开"提示对话框
+ *
+ * 当用户尝试在串口未连接的情况下操作电机、波形或 PID 时，
+ * 显示一个风格化的提示框，引导用户先打开串口。
+ *
+ * 包含自定义标题栏、渐变背景和圆角。
+ */
 void showSerialNotOpenTipDialog(QWidget *parent)
 {
     QDialog dlg(parent);
@@ -135,6 +188,19 @@ void showSerialNotOpenTipDialog(QWidget *parent)
     dlg.exec();
 }
 
+/**
+ * @brief 按钮悬停/按压动画过滤器
+ *
+ * 使用 QPropertyAnimation 对 QPushButton 的 geometry 属性做动画，
+ * 实现悬停放大（1.02×）、按下缩小（0.90×）的"弹性"效果。
+ *
+ * 动画机制：
+ * - Enter 事件：按钮放大到 1.02 倍
+ * - Leave 事件：回复到 1.0 倍
+ * - Pressed 事件：缩小到 0.90 倍
+ * - Released 事件：根据鼠标位置恢复到 1.0 或 1.02 倍
+ * - 所有动画使用 OutCubic 缓动曲线，90~120ms 持续时间
+ */
 class ButtonMotionFilter final : public QObject
 {
 public:
@@ -163,6 +229,15 @@ public:
         return QObject::eventFilter(watched, event);
     }
 
+    /**
+     * @brief 动画缩放到指定比例
+     *
+     * 以按钮中心为基准，计算缩放后的目标矩形。
+     * 动画完成后自动清理。
+     *
+     * @param scale       缩放比例（1.0 = 原始大小）
+     * @param durationMs  动画时长（毫秒）
+     */
     void animateToScale(double scale, int durationMs)
     {
         QRect base = m_btn->property("_baseGeom").toRect();
@@ -183,9 +258,15 @@ public:
     }
 
 private:
-    QPushButton *m_btn;
+    QPushButton *m_btn;  ///< 被观察的按钮对象
 };
 
+/**
+ * @brief 自定义下拉框，使用三角形箭头替代系统默认箭头
+ *
+ * 重写 paintEvent 在右侧绘制一个自定义三角形箭头，
+ * 避免系统主题在不同平台上渲染不一致的问题。
+ */
 class ChevronComboBox final : public QComboBox
 {
 public:
@@ -200,6 +281,7 @@ protected:
         QComboBox::paintEvent(event);
         Q_UNUSED(event);
 
+        // 获取下拉框的箭头区域
         QStyleOptionComboBox option;
         initStyleOption(&option);
         const QRect arrowRect = style()->subControlRect(QStyle::CC_ComboBox, &option, QStyle::SC_ComboBoxArrow, this);
@@ -207,6 +289,7 @@ protected:
             return;
         }
 
+        // 在箭头区域绘制一个倒三角形（▼）
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
         painter.setPen(Qt::NoPen);
@@ -222,6 +305,12 @@ protected:
     }
 };
 
+/**
+ * @brief 为按钮安装弹跳动画效果
+ *
+ * 安装 ButtonMotionFilter 事件过滤器，并连接 pressed/released/toggled 信号，
+ * 实现按下缩小、松开弹回的动画效果。
+ */
 void installButtonBounce(QPushButton *btn)
 {
     auto *filter = new ButtonMotionFilter(btn);
@@ -229,16 +318,24 @@ void installButtonBounce(QPushButton *btn)
     btn->setProperty("_baseGeom", btn->geometry());
 
     QObject::connect(btn, &QPushButton::pressed, btn, [filter]() {
-        filter->animateToScale(0.90, 120);
+        filter->animateToScale(0.90, 120);  // 按下缩小到 90%
     });
     QObject::connect(btn, &QPushButton::released, btn, [btn, filter]() {
-        filter->animateToScale(btn->underMouse() ? 1.02 : 1.0, 120);
+        filter->animateToScale(btn->underMouse() ? 1.02 : 1.0, 120);  // 松手弹回
     });
     QObject::connect(btn, &QPushButton::toggled, btn, [btn, filter](bool) {
         filter->animateToScale(btn->underMouse() ? 1.02 : 1.0, 90);
     });
 }
 
+/**
+ * @brief 创建一个带渐变背景和圆角的卡片容器
+ *
+ * @param bg     背景色基础色
+ * @param border 边框颜色
+ * @param radius 圆角半径
+ * @return 样式化的 QFrame 卡片
+ */
 QFrame *makeCard(const QString &bg, const QString &border, int radius = 10)
 {
     auto *card = new QFrame;
@@ -260,6 +357,14 @@ QFrame *makeCard(const QString &bg, const QString &border, int radius = 10)
     return card;
 }
 
+/**
+ * @brief 创建一个通用操作按钮（带弹跳动画）
+ *
+ * @param text 按钮文字
+ * @param bg   基础背景色
+ * @param h    最小高度
+ * @return 样式化的 QPushButton
+ */
 QPushButton *makeBtn(const QString &text, const QString &bg, int h = 30)
 {
     auto *btn = new QPushButton(text);
@@ -269,6 +374,16 @@ QPushButton *makeBtn(const QString &text, const QString &bg, int h = 30)
     return btn;
 }
 
+/**
+ * @brief 创建标题栏小按钮（关闭/最小化用）
+ *
+ * 按钮尺寸固定为 26×26，带圆形悬停高亮效果。
+ *
+ * @param text    按钮文字（如 "×"）
+ * @param bg      正常背景色
+ * @param hoverBg 悬停背景色
+ * @return 样式化的 QPushButton
+ */
 QPushButton *makeTitleBarBtn(const QString &text, const QString &bg, const QString &hoverBg)
 {
     auto *btn = new QPushButton(text);
@@ -282,6 +397,12 @@ QPushButton *makeTitleBarBtn(const QString &text, const QString &bg, const QStri
     return btn;
 }
 
+/**
+ * @brief 创建一个输入框
+ *
+ * @param ph 占位提示文本
+ * @return QLineEdit 指针
+ */
 QLineEdit *makeInput(const QString &ph)
 {
     auto *e = new QLineEdit;
@@ -290,6 +411,11 @@ QLineEdit *makeInput(const QString &ph)
     return e;
 }
 
+/**
+ * @brief 创建一个自定义下拉框（带三角形箭头）
+ *
+ * @return ChevronComboBox 指针
+ */
 QComboBox *makeCombo()
 {
     auto *c = new ChevronComboBox;
@@ -298,10 +424,14 @@ QComboBox *makeCombo()
 }
 }
 
+// ============================================================================
+// Widget 构造函数
+// ============================================================================
+
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget)
-    , m_serial(new SerialManager(this))
+    , m_serial(new SerialManager(this))     // 创建串口管理器（自动开始 300ms 轮询）
     , m_modeCombo(nullptr)
     , m_settingsBtn(nullptr)
     , m_modeStack(nullptr)
@@ -333,13 +463,14 @@ Widget::Widget(QWidget *parent)
     , m_dragHandle(nullptr)
     , m_dragging(false)
     , m_dragOffset()
-    , m_themeIndex(0)
-    , m_accentIndex(0)
+    , m_themeIndex(0)          // 默认蓝色主题
+    , m_accentIndex(0)         // 默认蓝色强调色
     , m_themeRebuildScheduled(false)
 {
+    // 无边框窗口
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     ui->setupUi(this);
-    buildUi();
+    buildUi();  // 构建完整 UI
 }
 
 Widget::~Widget()
@@ -347,8 +478,21 @@ Widget::~Widget()
     delete ui;
 }
 
+// ============================================================================
+// 事件过滤器 —— 实现无边框窗口拖动
+// ============================================================================
+
+/**
+ * @brief 事件过滤器：实现标题栏拖拽窗口
+ *
+ * 捕获 m_dragHandle（标题栏）上的 MouseButtonPress / MouseMove / MouseButtonRelease
+ * 事件，计算拖拽偏移量并调用 move() 实现无边框窗口拖动。
+ *
+ * 在 Wayland 下优先使用 startSystemMove() 实现原生窗口拖动。
+ */
 bool Widget::eventFilter(QObject *watched, QEvent *event)
 {
+    // 只处理 m_dragHandle 及其子控件上的事件
     const bool isDragTarget = watched == m_dragHandle
         || (m_dragHandle && watched && watched->parent() == m_dragHandle);
     if (!isDragTarget) {
@@ -386,6 +530,23 @@ bool Widget::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+// ============================================================================
+// 图表曲线注册 —— 注册所有 FOC/SMO 调试曲线到 PlotManager
+// ============================================================================
+
+/**
+ * @brief 注册所有图表曲线到 PlotManager
+ *
+ * 有感模式（20条）：
+ *   mechanicalAngle, Ua/Ub/Uc, ADC1/2/3, Ta/Tb/Tc, Ia/Ib/Ic,
+ *   Ualpha/Ubeta, Ialpha/Ibeta, Iq/Id, speed/speedOut,
+ *   local/localOut, adcvbus
+ *
+ * 无感 SMO 模式（5条）：
+ *   actualElectricalAngle, smoAngle, smoSpeed, smoEalpha/smoEbeta
+ *
+ * 曲线名称必须与 appendTrendValues() 中引用的一致。
+ */
 void Widget::setupPlotGraphs()
 {
     if (!m_plotManager) {
@@ -428,6 +589,22 @@ void Widget::setupPlotGraphs()
     m_plotManager->addGraph("smoEbeta", Qt::cyan);
 }
 
+// ============================================================================
+// 趋势数据分发 —— 将串口回包数据写入对应图表曲线
+// ============================================================================
+
+/**
+ * @brief 根据串口命令字，将回包数据分发到对应的图表曲线
+ *
+ * 命令字与曲线的映射关系：
+ * - 单值命令（机械角度、速度、位置等）→ 一条曲线
+ * - 双值命令（Uα/Uβ、Iα/Iβ、Iq/Id 等）→ 两条曲线
+ * - 三值命令（三相电压、电流、ADC 等）→ 三条曲线
+ * - 无感 SMO 命令 → 对应的 SMO 曲线
+ *
+ * @param command 串口命令字
+ * @param values  解析出的 float 值列表
+ */
 void Widget::appendTrendValues(int command, const QVariantList &values)
 {
     if (!m_plotManager || values.isEmpty()) {
@@ -527,6 +704,29 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
     }
 }
 
+// ============================================================================
+// buildUi —— 核心 UI 构建函数
+// ============================================================================
+
+/**
+ * @brief 构建（或重建）完整用户界面
+ *
+ * 本函数在以下情况被调用：
+ * 1. Widget 构造时
+ * 2. 用户切换主题或强调色时
+ *
+ * 重建流程：
+ * 1. 断开旧串口信号连接，避免重复绑定
+ * 2. 清空命令映射表和 UI 指针
+ * 3. 根据当前主题索引加载配色方案并生成全局样式表
+ * 4. 清空旧布局中的所有子控件
+ * 5. 重建：标题栏 → 左侧面板（串口+电机）→ 右侧面板（图表+调试台）
+ * 6. 绑定额外的信号/槽
+ * 7. 刷新串口列表
+ *
+ * 注意：主题切换时界面完全重建，所有 UI 指针需要重新赋值。
+ *       旧控件通过递归删除布局项来自动析构。
+ */
 void Widget::buildUi()
 {
     if (m_serial) {
@@ -539,6 +739,9 @@ void Widget::buildUi()
     m_plotManager = nullptr;
     m_plotRangeSlider = nullptr;
 
+    // ---- 主题配色定义 ----
+    // 6 套主题轮换：蓝色(默认)、浅色、纯黑、绿色、暖色、紫色
+    // 每套主题包含窗口背景、面板背景、卡片背景、边框、主文字、副文字色
     struct Theme {
         QString windowBg;
         QString panelBg;
@@ -549,13 +752,14 @@ void Widget::buildUi()
     };
 
     const QList<Theme> themes = {
-        {"#0d1423", "#15213a", "#223150", "#6d88bb", "#f4f8ff", "#cbd8f6"},
-        {"#eaf3ff", "#f8fbff", "#ffffff", "#9db7da", "#2a4268", "#6780a8"},
-        {"#0b0b0b", "#121212", "#1a1a1a", "#4a4a4a", "#f5f5f5", "#c8c8c8"},
-        {"#112018", "#193126", "#254535", "#6fa98b", "#eefdf4", "#b8ddc7"},
-        {"#241712", "#35211a", "#4a2d24", "#c58763", "#fff4ee", "#e8bfaa"},
-        {"#1c1730", "#282046", "#382c61", "#9787df", "#faf6ff", "#d7cbf7"}
+        {"#0d1423", "#15213a", "#223150", "#6d88bb", "#f4f8ff", "#cbd8f6"},  // 蓝色（默认）
+        {"#eaf3ff", "#f8fbff", "#ffffff", "#9db7da", "#2a4268", "#6780a8"},  // 浅色
+        {"#0b0b0b", "#121212", "#1a1a1a", "#4a4a4a", "#f5f5f5", "#c8c8c8"},  // 纯黑
+        {"#112018", "#193126", "#254535", "#6fa98b", "#eefdf4", "#b8ddc7"},  // 绿色
+        {"#241712", "#35211a", "#4a2d24", "#c58763", "#fff4ee", "#e8bfaa"},  // 暖色
+        {"#1c1730", "#282046", "#382c61", "#9787df", "#faf6ff", "#d7cbf7"}   // 紫色
     };
+    // 4 种强调色：蓝色、绿色、橙色、红色
     const QList<QString> accents = {"#5d93ff", "#59d98d", "#ffbf69", "#ff7f96"};
 
     const Theme th = themes[qBound(0, m_themeIndex, themes.size() - 1)];
@@ -873,6 +1077,10 @@ void Widget::buildUi()
     auto *er = new QHBoxLayout; er->addWidget(new QLabel(QStringLiteral("电角度"))); er->addWidget(elecAngleEdit);
     rv->addLayout(zr); rv->addLayout(er); rv->addStretch();
 
+    // ---- 底部调试台 ----
+    // 从左到右：零位校准 → 控制模式+波形按钮 → 目标值设置 → PID 参数设置
+    // 波形按钮采用单选互斥逻辑，按下时发送 OPEN 命令，关闭时发送 CLOSE 命令
+
     auto *control = new QGroupBox(QStringLiteral("控制模式选择"));
     control->setFixedWidth(290);
     control->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
@@ -1037,9 +1245,12 @@ void Widget::buildUi()
     bottomL->addWidget(target);
     bottomL->addWidget(pid, 1);
 
-    // 无感页复用“曲线 + 底部调试台”的信息架构。
-    // 目前 AT32 仍使用有感角度闭环，SMO 在后台运行；因此这里先提供调试入口，
+    // ---- 无感（SMO）调试页面 ----
+    // 复用”曲线 + 底部调试台”的信息架构。
+    // 目前 AT32 仍使用有感角度闭环，SMO 在后台运行，因此这里先提供调试入口，
     // 不直接切换下位机到无感闭环，避免误操作影响正在跑的有感 FOC。
+    // 无感页提供 4 个 SMO 波形按钮（实际电角度、SMO 角度、SMO 速度、SMO 反电势），
+    // 它们允许多选（而非有感页的单选），方便对比观测。
     auto *noSenseCard = makeCard(th.cardBg, th.border, 10);
     auto *noSenseL = new QHBoxLayout(noSenseCard);
     noSenseL->setContentsMargins(4, 6, 4, 6);
@@ -1144,6 +1355,8 @@ void Widget::buildUi()
     });
     plotRangeSlider->valueChanged(plotRangeSlider->value());
 
+    // 有感/无感模式切换信号连接
+    // 切到无感时自动清除有感页已打开的波形，避免两页数据冲突
     connect(mode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
         if (m_modeStack) {
             m_modeStack->setCurrentIndex(qBound(0, idx, 1));
@@ -1152,7 +1365,7 @@ void Widget::buildUi()
             return;
         }
 
-        // 切到无感时，清掉有感页中已打开的波形源。
+        // 切到无感时，清掉有感页中已打开的波形源
         for (auto it = m_trendOpenCmd.constBegin(); it != m_trendOpenCmd.constEnd(); ++it) {
             QPushButton *btn = it.key();
             if (!btn || !btn->isChecked()) {
@@ -1272,12 +1485,19 @@ void Widget::buildUi()
             m_serial->sendFloatCommand(modeCmds[idx], static_cast<double>(idx));
         }
     });
+    // 判断命令是否为无感 SMO 命令（用于波形互斥逻辑）
     const auto isNoSenseTrendCommand = [](int command) {
         return command == static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE)
             || command == static_cast<int>(SerialCommand::CMD_SMO_ANGLE)
             || command == static_cast<int>(SerialCommand::CMD_SMO_SPEED)
             || command == static_cast<int>(SerialCommand::CMD_SMO_BACKEMF);
     };
+
+    // ---- 波形订阅按钮通用信号绑定 ----
+    // 规则：
+    //   - 有感波形：单选互斥（打开新波形自动关闭旧波形）
+    //   - 无感 SMO 波形：允许多选（方便对比实际电角度和 SMO 角度）
+    //   - 串口未连接时阻止操作并弹出提示
     for (auto it = m_trendOpenCmd.constBegin(); it != m_trendOpenCmd.constEnd(); ++it) {
         QPushButton *btn = it.key();
         connect(btn, &QPushButton::clicked, this, [this, btn, isNoSenseTrendCommand](bool checked) {
@@ -1305,7 +1525,7 @@ void Widget::buildUi()
                         continue;
                     }
                     if (noSenseCmd && otherNoSenseCmd) {
-                        continue;
+                        continue;  // 无感曲线之间不互斥
                     }
                     other->blockSignals(true);
                     other->setChecked(false);
@@ -1384,6 +1604,12 @@ void Widget::buildUi()
     connect(m_serial, &SerialManager::dataReceived, this, [this](const QString &) {
         // 串口日志输出禁用，避免高频 append 造成 UI 卡顿。
     });
+    // ---- 串口帧解析信号处理（核心数据路由） ----
+    // CMD_CONNECT_MOTOR 回包：将下位机当前参数回填到各输入框
+    //   values[0-13]：极对数、方向、零偏值、PID 系数等
+    //   values[14-16]（扩展）：电机 Rs/Lq/Ld，仅回包长度≥17 时回填
+    // CMD_ZEROCALIBRATIO_OVER 回包：回填零偏值和电角度
+    // 其他命令：通过 appendTrendValues 分发到图表曲线
     connect(m_serial, &SerialManager::frameParsed, this, [this, zeroCalibBtn](int command, const QVariantList &values) {
         if (command == static_cast<int>(SerialCommand::CMD_CONNECT_MOTOR) && values.size() >= 14) {
             if (m_polePairsEdit) m_polePairsEdit->setText(formatCompactNumber(values[0].toDouble()));

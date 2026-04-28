@@ -872,3 +872,198 @@ AT32 固件收到这三个命令后会写入 flash，并立即更新后台 SMO �
 - 让串口参数下拉真正生效
 - 恢复可控的串口日志系统
 - 解决当前构建环境中的 AutoMoc 异常
+
+---
+
+## 附录 A：源码注释与文档约定
+
+本项目的源码已添加详细的中文 Doxygen 风格注释。注释约定如下：
+
+### A.1 文件头注释
+
+每个源文件（`.h` / `.cpp`）以 `@file` 标记开头，说明该文件的职责和核心功能：
+
+```cpp
+/**
+ * @file serialmanager.cpp
+ * @brief 串口管理器实现
+ *
+ * 实现串口枚举、连接管理、协议编解码的核心逻辑。
+ * ...
+ */
+```
+
+### A.2 类注释
+
+类声明前用 `@brief` 描述类的职责：
+
+```cpp
+/**
+ * @brief 串口管理器
+ *
+ * 核心职责：
+ * 1. 串口热插拔检测（300ms 定时器轮询）
+ * 2. 串口打开/关闭（固定 8N1 无流控）
+ * ...
+ */
+class SerialManager : public QObject
+```
+
+### A.3 函数注释
+
+公共接口和复杂函数前标注功能、参数和返回值：
+
+```cpp
+/**
+ * @brief 发送浮点命令帧（核心发送接口）
+ *
+ * 构造固定 8 字节的命令帧并写入串口
+ * @param command 命令字（0-255）
+ * @param value   伴随的 float 参数值
+ * @return true 发送成功
+ */
+bool sendFloatCommand(int command, double value);
+```
+
+### A.4 成员变量注释
+
+成员变量使用行尾注释：
+
+```cpp
+QByteArray m_rxBuffer;             ///< 接收数据缓冲区
+QTimer *m_portWatchTimer;          ///< 串口热插拔轮询定时器
+```
+
+### A.5 代码段注释
+
+关键逻辑段使用 `// ----` 分隔线和大段注释：
+
+```cpp
+// ============================================================================
+// buildUi —— 核心 UI 构建函数
+// ============================================================================
+```
+
+---
+
+## 附录 B：数据流与信号链
+
+本附录描述数据从物理串口到 UI 显示或控制命令发送的完整路径。
+
+### B.1 上行数据流（接收：MCU → 上位机）
+
+```
+[MCU 串口发送]
+      ↓
+QSerialPort::readyRead
+      ↓
+SerialManager::readSerialData()     // 读取全部可用字节
+      ↓
+m_rxBuffer.append(bytes)            // 拼接到接收缓冲区
+      ↓
+SerialManager::parseRxBuffer()       // 循环解析完整帧
+      ↓
+SerialManager::tryParseOneFrame()    // 验证帧头/帧尾/校验和，提取 float 数组
+      ↓
+emit frameParsed(cmd, values)        // 发射解析信号
+      ↓
+Widget 中 frameParsed 信号槽:
+  ├── CMD_CONNECT_MOTOR     → 参数回填（极对数/PID 系数/Rs/Lq/Ld 等）
+  ├── CMD_ZEROCALIBRATIO_OVER → 零偏值 + 电角度回填
+  ├── CMD_MOSTEMP           → MOS 温度文本 + 滑条更新
+  └── 其他波形命令          → appendTrendValues() → PlotManager::appendData()
+```
+
+### B.2 下行数据流（发送：上位机 → MCU）
+
+```
+用户操作界面控件
+      ↓
+信号槽触发 → m_serial->sendFloatCommand(cmd, value)
+      ↓
+构造 8 字节帧: [0xA5][CMD][4B float LE][校验和][0x49]
+      ↓
+QSerialPort::write(frame)
+      ↓
+[MCU 串口接收并解析执行]
+```
+
+### B.3 热插拔检测流程
+
+```
+m_portWatchTimer (300ms)
+      ↓
+SerialManager::updateAvailablePorts()
+      ↓
+QSerialPortInfo::availablePorts() + /dev/ttyUSB* 扫描
+      ↓
+检查已连接串口是否仍在列表中
+  ├── 不在 → 自动 close + 状态复位（电机/温度/波形）
+  └── 在   → 检查列表是否变化，更新 UI
+```
+
+---
+
+## 附录 C：类图与依赖关系
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Widget (主窗口)                       │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                     buildUi()                         │  │
+│  │  ┌──────────┐  ┌──────────────────┐  ┌───────────┐  │  │
+│  │  │ 左侧面板  │  │    图表区        │  │ 底部调试台 │  │  │
+│  │  │ 串口配置  │  │ QCustomPlot     │  │ 零位/控制 │  │  │
+│  │  │ 电机参数  │  │ PlotManager     │  │ PID/目标  │  │  │
+│  │  └──────────┘  └──────────────────┘  └───────────┘  │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                  │
+│                    ┌─────┴──────┐                          │
+│                    │ SerialManager                         │
+│                    │  串口通信 + 协议解析                    │
+│                    │  sendFloatCommand()                   │
+│                    │  tryParseOneFrame()                   │
+│                    │  frameParsed 信号                      │
+│                    └────────────┘                          │
+│                          │                                  │
+│                    QSerialPort                               │
+│                    [AT32 MCU]                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 附录 D：构建说明
+
+### D.1 环境要求
+
+| 依赖 | 版本要求 |
+|------|---------|
+| CMake | ≥ 3.16 |
+| C++ 编译器 | 支持 C++17 |
+| Qt | Qt 5.15+ 或 Qt 6.x |
+| Qt SerialPort | 可选（无此模块时串口功能禁用） |
+
+### D.2 构建步骤
+
+```bash
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+
+### D.3 CMake 选项
+
+| 选项 | 说明 |
+|------|------|
+| `LIJOINT_HAS_SERIALPORT` | 自动检测，有 SerialPort 模块时为 `ON` |
+| MinGW 特殊处理 | 启用 `-Wa,-mbig-obj` 避免大目标文件错误 |
+
+---
+
+## 附录 E：版本历史
+
+| 日期 | 版本 | 说明 |
+|------|------|------|
+| 2025-12-02 | 1.0 | 初始版本，有感 FOC 调试功能完整实现 |
+| 2026-xx-xx | 1.1 | 增加 SMO 无感观测调试页（预留）、完善代码注释和文档 |
