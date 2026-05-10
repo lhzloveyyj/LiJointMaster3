@@ -15,10 +15,12 @@
 #include "ui/widget.h"
 
 #include <QApplication>
+#include <QIcon>
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    a.setWindowIcon(QIcon(":/icons/motor.ico"));
     Widget w;          // 构造时自动创建 SerialManager 并构建界面
     w.show();          // 显示无边框主窗口
     return QCoreApplication::exec();  // 进入事件循环

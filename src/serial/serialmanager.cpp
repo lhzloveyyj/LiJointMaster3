@@ -48,6 +48,11 @@ constexpr int kMaxPayloadLen = 128;
  */
 QString normalizedPortName(const QString &portName)
 {
+#ifdef Q_OS_WIN
+    if (portName.startsWith(QStringLiteral("\\\\.\\"))) {
+        return portName.mid(4);
+    }
+#endif
     if (portName.startsWith(QStringLiteral("/dev/"))) {
         return QFileInfo(portName).fileName();
     }
@@ -162,7 +167,12 @@ void SerialManager::updateAvailablePorts(bool manualRefresh)
     QStringList otherPorts;      // 其他串口设备
     const auto portInfos = QSerialPortInfo::availablePorts();
     for (const QSerialPortInfo &info : portInfos) {
-        const QString location = info.systemLocation().isEmpty() ? info.portName() : info.systemLocation();
+        QString location;
+#ifdef Q_OS_WIN
+        location = info.portName();
+#else
+        location = info.systemLocation().isEmpty() ? info.portName() : info.systemLocation();
+#endif
         if (location.contains(QStringLiteral("ttyUSB")) || location.contains(QStringLiteral("ttyACM"))) {
             preferredPorts << location;
         } else {

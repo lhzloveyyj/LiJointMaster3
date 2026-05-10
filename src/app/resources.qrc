@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file>../../packaging/assets/motor.ico</file>
+    </qresource>
+</RCC>
