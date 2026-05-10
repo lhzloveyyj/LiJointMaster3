@@ -97,7 +97,7 @@ void PlotManager::addGraph(const QString &name, const QColor &color)
  */
 void PlotManager::appendData(const QString &name, double value)
 {
-    if (!m_graphs.contains(name)) return;
+    if (m_paused || !m_graphs.contains(name)) return;
 
     m_key += 0.0005;
 
@@ -108,6 +108,11 @@ void PlotManager::appendData(const QString &name, double value)
 
     // X 轴右对齐：保持 m_key 在可视窗口右端
     m_plot->xAxis->setRange(m_key, m_xAxisRange, Qt::AlignRight);
+}
+
+void PlotManager::setPaused(bool paused)
+{
+    m_paused = paused;
 }
 
 /**

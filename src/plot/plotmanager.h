@@ -60,13 +60,22 @@ public slots:
     /**
      * @brief 向指定的曲线追加一个数据点
      *
-     * 如果曲线不存在，静默忽略。
+     * 如果曲线不存在或当前处于暂停状态，静默忽略。
      * 每次调用自动推进时间轴 m_key += 0.0005。
      *
      * @param name  曲线名称
      * @param value 数据值
      */
     void appendData(const QString &name, double value);
+
+    /**
+     * @brief 暂停/恢复曲线更新（纯本地操作，不涉及下位机）
+     *
+     * 暂停后 appendData() 不再追加新数据点，图表冻结。
+     *
+     * @param paused true 暂停，false 恢复
+     */
+    void setPaused(bool paused);
 
 private slots:
     /** @brief 鼠标移动事件处理（数据点吸附提示） */
@@ -85,6 +94,8 @@ private:
     QMap<QString, GraphData> m_graphs; ///< 曲线名称 → 数据映射表
     double m_key;                      ///< 当前时间键值（每次追加自增 0.0005）
     double m_xAxisRange;               ///< X 轴可视范围（秒）
+
+    bool m_paused = false;            ///< 是否暂停曲线更新
 
     QCPItemText *m_tipText;           ///< 鼠标悬停时的数据值提示文本
 };

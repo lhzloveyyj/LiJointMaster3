@@ -163,6 +163,7 @@ private:
     QCustomPlot *m_plotWidget;           ///< QCustomPlot 图表控件
     PlotManager *m_plotManager;          ///< 图表管理器
     QSlider *m_plotRangeSlider;          ///< 横轴范围滑条
+    QPushButton *m_pauseBtn;             ///< 暂停/恢复曲线按钮
 
     // ---- 设置 ----
     QDialog *m_settingsDialog;           ///< 设置对话框

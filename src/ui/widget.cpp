@@ -458,6 +458,7 @@ Widget::Widget(QWidget *parent)
     , m_plotWidget(nullptr)
     , m_plotManager(nullptr)
     , m_plotRangeSlider(nullptr)
+    , m_pauseBtn(nullptr)
     , m_settingsDialog(nullptr)
     , m_themeCombo(nullptr)
     , m_dragHandle(nullptr)
@@ -542,8 +543,9 @@ bool Widget::eventFilter(QObject *watched, QEvent *event)
  *   Ualpha/Ubeta, Ialpha/Ibeta, Iq/Id, speed/speedOut,
  *   local/localOut, adcvbus
  *
- * 无感 SMO 模式（5条）：
- *   actualElectricalAngle, smoAngle, smoSpeed, smoEalpha/smoEbeta
+ * 无感 SMO 模式：
+ *   actualElectricalAngle, pllAngle, smoAngle, smoSpeed,
+ *   smoEalpha/smoEbeta, smoPllError/smoEmag
  *
  * 曲线名称必须与 appendTrendValues() 中引用的一致。
  */
@@ -582,11 +584,14 @@ void Widget::setupPlotGraphs()
 
     // 无感/SMO 调试曲线：下位机仍然运行有感 FOC，SMO 只在后台观测。
     // 这里单独建图，便于在无感调试台中订阅估算角度、估算速度和反电势。
-    m_plotManager->addGraph("actualElectricalAngle", Qt::red);
-    m_plotManager->addGraph("smoAngle", Qt::yellow);
-    m_plotManager->addGraph("smoSpeed", Qt::cyan);
-    m_plotManager->addGraph("smoEalpha", Qt::yellow);
-    m_plotManager->addGraph("smoEbeta", Qt::cyan);
+    m_plotManager->addGraph("actualElectricalAngle", Qt::red);          // 编码器电角度，有感参考
+    m_plotManager->addGraph("pllAngle", Qt::yellow);                    // PLL 角度：锁相后的最终角度
+    m_plotManager->addGraph("smoAngle", QColor(255, 128, 0));           // SMO 角度：反电势 atan2 直接角度
+    m_plotManager->addGraph("smoSpeed", Qt::cyan);                      // PLL 输出电角速度
+    m_plotManager->addGraph("smoEalpha", Qt::yellow);                   // SMO 反电势 alpha 轴
+    m_plotManager->addGraph("smoEbeta", Qt::cyan);                      // SMO 反电势 beta 轴
+    m_plotManager->addGraph("smoPllError", QColor(255, 96, 160));       // PLL 归一化误差
+    m_plotManager->addGraph("smoEmag", QColor(120, 220, 120));          // 反电势幅值
 }
 
 // ============================================================================
@@ -685,9 +690,15 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
     // SMO 回包由无感调试台的三个曲线按钮打开。
     // 角度和速度各是 1 个 float，反电势是 eAlpha/eBeta 两个 float。
     case SerialCommand::CMD_ELECTRICALANGLE:
+        // 编码器电角度作为参考曲线，用来判断 SMO/PLL 是否同频同相。
         m_plotManager->appendData("actualElectricalAngle", valueAt(0));
         break;
     case SerialCommand::CMD_SMO_ANGLE:
+        // CMD_SMO_ANGLE 历史命令号保持不变，但现在 UI 明确标成 PLL 角度。
+        m_plotManager->appendData("pllAngle", valueAt(0));
+        break;
+    case SerialCommand::CMD_SMO_RAW_ANGLE:
+        // SMO 角度是反电势 atan2 直接结果，用来绕开 PLL 单独验证 SMO 本体。
         m_plotManager->appendData("smoAngle", valueAt(0));
         break;
     case SerialCommand::CMD_SMO_SPEED:
@@ -697,6 +708,13 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
         if (values.size() >= 2) {
             m_plotManager->appendData("smoEalpha", valueAt(0));
             m_plotManager->appendData("smoEbeta", valueAt(1));
+        }
+        break;
+    case SerialCommand::CMD_SMO_DIAG:
+        if (values.size() >= 2) {
+            // 诊断包两个 float：values[0]=PLL误差，values[1]=反电势幅值。
+            m_plotManager->appendData("smoPllError", valueAt(0));
+            m_plotManager->appendData("smoEmag", valueAt(1));
         }
         break;
     default:
@@ -852,6 +870,7 @@ void Widget::buildUi()
     auto *settingsBtn = makeBtn(QStringLiteral("设置"), accentBrush, 28);
     settingsBtn->setFixedWidth(60);
     m_settingsBtn = settingsBtn;
+    auto *minimizeBtn = makeTitleBarBtn(QStringLiteral("—"), "rgba(255,255,255,0.10)", "#5d93ff");
     auto *closeBtn = makeTitleBarBtn(QStringLiteral("×"), "rgba(255,255,255,0.10)", "#ff6f84");
 
     topL->addWidget(mark);
@@ -861,6 +880,7 @@ void Widget::buildUi()
     topL->addWidget(mode);
     topL->addWidget(settingsBtn);
     topL->addStretch();
+    topL->addWidget(minimizeBtn);
     topL->addWidget(closeBtn);
 
     mainV->addWidget(topBar);
@@ -1053,6 +1073,15 @@ void Widget::buildUi()
     rangeRow->addWidget(rangeLabel);
     rangeRow->addWidget(plotRangeSlider, 1);
     rangeRow->addWidget(rangeHint);
+
+    m_pauseBtn = makeBtn(QStringLiteral("暂停"), accentBrush, 28);
+    m_pauseBtn->setCheckable(true);
+    m_pauseBtn->setFixedWidth(64);
+    connect(m_pauseBtn, &QPushButton::toggled, [this](bool checked) {
+        m_pauseBtn->setText(checked ? QStringLiteral("继续") : QStringLiteral("暂停"));
+        if (m_plotManager) m_plotManager->setPaused(checked);
+    });
+    rangeRow->addWidget(m_pauseBtn);
 
     chartV->addWidget(plotFrame, 1);
     chartV->addLayout(rangeRow);
@@ -1249,21 +1278,21 @@ void Widget::buildUi()
     // 复用”曲线 + 底部调试台”的信息架构。
     // 目前 AT32 仍使用有感角度闭环，SMO 在后台运行，因此这里先提供调试入口，
     // 不直接切换下位机到无感闭环，避免误操作影响正在跑的有感 FOC。
-    // 无感页提供 4 个 SMO 波形按钮（实际电角度、SMO 角度、SMO 速度、SMO 反电势），
+    // 无感页提供 SMO 波形按钮（实际电角度、PLL角度、SMO角度、速度、反电势、诊断量），
     // 它们允许多选（而非有感页的单选），方便对比观测。
     auto *noSenseCard = makeCard(th.cardBg, th.border, 10);
     auto *noSenseL = new QHBoxLayout(noSenseCard);
     noSenseL->setContentsMargins(4, 6, 4, 6);
     noSenseL->setSpacing(4);
 
-    auto *noSenseControl = new QGroupBox(QStringLiteral("无感控制模式选择"));
-    noSenseControl->setFixedWidth(290);
+    auto *noSenseControl = new QGroupBox(QStringLiteral("无感控制与遥测"));
+    noSenseControl->setFixedWidth(360);
     noSenseControl->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     auto *ncv = new QVBoxLayout(noSenseControl);
     ncv->setContentsMargins(8, 8, 8, 8);
     ncv->setSpacing(6);
     auto *noSenseMode = makeCombo();
-    noSenseMode->addItems({QStringLiteral("开环模式"), QStringLiteral("电流环"), QStringLiteral("速度环"), QStringLiteral("位置环")});
+    noSenseMode->addItems({QStringLiteral("开环模式"), QStringLiteral("电流环"), QStringLiteral("速度环")});
     noSenseMode->setFixedWidth(216);
     ncv->addWidget(noSenseMode, 0, Qt::AlignLeft);
 
@@ -1276,39 +1305,121 @@ void Widget::buildUi()
     smoWaveGrid->setVerticalSpacing(6);
     smoWaveGrid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     const QList<QPair<int, int>> smoWaveCmds = {
+        // 每个按钮一组 open/close 命令；无感页允许多开，便于同时观察启动和闭环状态。
+        {static_cast<int>(SerialCommand::CMD_SPEED), static_cast<int>(SerialCommand::CMD_SPEED_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_SPEEDOUT), static_cast<int>(SerialCommand::CMD_SPEEDOUT_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_IQ_ID), static_cast<int>(SerialCommand::CMD_IQ_ID_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE), static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_SMO_ANGLE), static_cast<int>(SerialCommand::CMD_SMO_ANGLE_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_SMO_RAW_ANGLE), static_cast<int>(SerialCommand::CMD_SMO_RAW_ANGLE_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_SMO_SPEED), static_cast<int>(SerialCommand::CMD_SMO_SPEED_CLOSE)},
-        {static_cast<int>(SerialCommand::CMD_SMO_BACKEMF), static_cast<int>(SerialCommand::CMD_SMO_BACKEMF_CLOSE)}
+        {static_cast<int>(SerialCommand::CMD_SMO_BACKEMF), static_cast<int>(SerialCommand::CMD_SMO_BACKEMF_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_SMO_DIAG), static_cast<int>(SerialCommand::CMD_SMO_DIAG_CLOSE)}
     };
-    const QStringList smoWaves = {QStringLiteral("实际电角度"), QStringLiteral("SMO角度"), QStringLiteral("SMO速度"), QStringLiteral("SMO反电势")};
+    const QStringList smoWaves = {
+        QStringLiteral("速度反馈"),
+        QStringLiteral("速度环输出"),
+        QStringLiteral("Iq/Id"),
+        QStringLiteral("编码器电角度"),
+        QStringLiteral("PLL估计角度"),
+        QStringLiteral("SMO原始角度"),
+        QStringLiteral("PLL速度"),
+        QStringLiteral("反电势Eα/Eβ"),
+        QStringLiteral("PLL误差粉/eMag绿")
+    };
     for (int i = 0; i < smoWaves.size(); ++i) {
         auto *b = makeBtn(smoWaves[i], "#3f4f6d", 30);
         b->setCheckable(true);
         b->setStyleSheet(trendStyle);
-        b->setFixedWidth(88);
+        b->setFixedWidth(104);
         m_trendOpenCmd.insert(b, smoWaveCmds[i].first);
         m_trendCloseCmd.insert(b, smoWaveCmds[i].second);
         smoWaveGrid->addWidget(b, i / 3, i % 3);
     }
     ncv->addLayout(smoWaveGrid);
+    auto *resetRow = new QHBoxLayout;
+    auto *resetSmoBtn = makeBtn(QStringLiteral("复位SMO"), "#495b78", 30);
+    resetSmoBtn->setStyleSheet(trendStyle);
+    resetSmoBtn->setFixedWidth(88);
+    resetRow->addWidget(resetSmoBtn);
+    resetRow->addStretch();
+    ncv->addLayout(resetRow);
     ncv->addStretch();
+
+    auto *noSenseTarget = new QGroupBox(QStringLiteral("无感启动参数"));
+    noSenseTarget->setFixedWidth(205);
+    noSenseTarget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    auto *nstv = new QVBoxLayout(noSenseTarget);
+    nstv->setContentsMargins(6, 6, 6, 6);
+    nstv->setSpacing(6);
+    const QStringList noSenseTargetNames = {
+        QStringLiteral("设置Uq"),
+        QStringLiteral("设置Iq限流"),
+        QStringLiteral("设置速度"),
+        QStringLiteral("Iq硬上限")
+    };
+    const QList<int> noSenseTargetCmds = {
+        static_cast<int>(SerialCommand::CMD_SETUQ),
+        static_cast<int>(SerialCommand::CMD_SETIQ),
+        static_cast<int>(SerialCommand::CMD_SETSPEEDTAR),
+        static_cast<int>(SerialCommand::CMD_SETIQMAX)
+    };
+    for (int i = 0; i < noSenseTargetNames.size(); ++i) {
+        auto *r = new QHBoxLayout;
+        r->setSpacing(0);
+        auto *edit = makeInput("0.0");
+        auto *btn = makeBtn(noSenseTargetNames[i], accentBrush, 28);
+        auto *gap = new QWidget;
+        gap->setFixedWidth(kTargetGapW);
+        gap->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        edit->setFixedWidth(kTargetInputW);
+        btn->setFixedWidth(kTargetBtnW);
+        r->addWidget(edit);
+        r->addWidget(gap);
+        r->addWidget(btn);
+        nstv->addLayout(r);
+        connect(btn, &QPushButton::clicked, this, [this, edit, i, noSenseTargetCmds]() {
+            if (!m_serial || !m_serial->isConnected()) {
+                if (m_serial) {
+                    m_serial->playSystemAlert();
+                }
+                showSerialNotOpenTipDialog(this);
+                return;
+            }
+            m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_SENSOR_SENSORLESS), 0.0);
+            m_serial->sendFloatCommand(noSenseTargetCmds[i], QLocale().toDouble(edit->text()));
+        });
+    }
+    nstv->addStretch();
 
     // 暂时保留一个观测量说明框，后续可以在这里扩展成数值表：
     // 例如 SMO angle、speed、eAlpha/eBeta，以及有感角度和 SMO 角度误差。
-    auto *smoReadback = new QGroupBox(QStringLiteral("SMO观测量"));
+    auto *smoReadback = new QGroupBox(QStringLiteral("SMO 观测器遥测"));
     smoReadback->setMinimumWidth(260);
     smoReadback->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto *srv = new QVBoxLayout(smoReadback);
     srv->setContentsMargins(8, 8, 8, 8);
     srv->setSpacing(6);
-    auto *smoNote = new QLabel(QStringLiteral("使用上方按钮订阅SMO角度、速度和反电势曲线"));
+    auto *smoNote = new QLabel(QStringLiteral("启动建议：切无感 -> Iq限流 -> 目标速度 -> 速度环；重点看 speed、speedOut、Iq/Id、PLL误差(粉色)/eMag(绿色)。"));
+    smoNote->setWordWrap(true);
     smoNote->setStyleSheet(QString("color:%1;font-size:13px;font-weight:600;").arg(th.subText));
     srv->addWidget(smoNote);
     srv->addStretch();
 
     noSenseL->addWidget(noSenseControl);
+    noSenseL->addWidget(noSenseTarget);
     noSenseL->addWidget(smoReadback, 1);
+
+    connect(resetSmoBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) {
+                m_serial->playSystemAlert();
+            }
+            showSerialNotOpenTipDialog(this);
+            return;
+        }
+        m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_SMO_RESET), 0.0);
+    });
 
     auto *modeStack = new QStackedWidget;
     modeStack->addWidget(bottomCard);
@@ -1355,8 +1466,23 @@ void Widget::buildUi()
     });
     plotRangeSlider->valueChanged(plotRangeSlider->value());
 
+    const auto sendSensorModeCommand = [this](int idx) {
+        if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) {
+                m_serial->playSystemAlert();
+            }
+            showSerialNotOpenTipDialog(this);
+            return;
+        }
+
+        const int sensorCmd = (idx == 1)
+            ? static_cast<int>(SerialCommand::CMD_SENSOR_SENSORLESS)
+            : static_cast<int>(SerialCommand::CMD_SENSOR_SENSORED);
+        m_serial->sendFloatCommand(sensorCmd, 0.0);
+    };
+
     // 有感/无感模式切换信号连接
-    // 切到无感时自动清除有感页已打开的波形，避免两页数据冲突
+    // currentIndexChanged 负责切页面；activated 负责用户每次点选时下发反馈源命令。
     connect(mode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
         if (m_modeStack) {
             m_modeStack->setCurrentIndex(qBound(0, idx, 1));
@@ -1385,6 +1511,7 @@ void Widget::buildUi()
             m_serial->setProperty("activeTrendCommand", 0);
         }
     });
+    connect(mode, qOverload<int>(&QComboBox::activated), this, sendSensorModeCommand);
 
     connect(openSerialBtn, &QPushButton::clicked, this, [this, openSerialBtn]() {
         if (!m_serial) {
@@ -1400,6 +1527,7 @@ void Widget::buildUi()
         m_serial->connectPort(port, baud);
         openSerialBtn->setText(m_serial->isConnected() ? QStringLiteral("关闭串口") : QStringLiteral("打开串口"));
     });
+    connect(minimizeBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     connect(closeBtn, &QPushButton::clicked, this, &QWidget::close);
     connect(logBtn, &QPushButton::clicked, this, [this]() {
         if (!m_logDialog) {
@@ -1464,17 +1592,20 @@ void Widget::buildUi()
             static_cast<int>(SerialCommand::CMD_POSITION_LOOP)
         };
         if (idx >= 0 && idx < modeCmds.size()) {
+            m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_SENSOR_SENSORED), 0.0);
             m_serial->sendFloatCommand(modeCmds[idx], static_cast<double>(idx));
         }
     });
-    connect(noSenseMode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
+    connect(noSenseMode, qOverload<int>(&QComboBox::activated), this, [this](int idx) {
         if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) {
+                m_serial->playSystemAlert();
+            }
+            showSerialNotOpenTipDialog(this);
             return;
         }
 
-        // 无感页的模式框先沿用 AT32 现有控制模式命令。
-        // 这让 UI 操作习惯和有感页保持一致；真正切到“无感角度闭环”之前，
-        // 下位机仍需在固件侧明确使用 SMO angle 替代 MT6701 angle。
+        // 无感页的模式框先确保反馈源为 SMO+PLL，再发送控制环模式命令。
         static const QList<int> modeCmds = {
             static_cast<int>(SerialCommand::CMD_OPEN_LOOP),
             static_cast<int>(SerialCommand::CMD_CURRENT_LOOP),
@@ -1482,15 +1613,22 @@ void Widget::buildUi()
             static_cast<int>(SerialCommand::CMD_POSITION_LOOP)
         };
         if (idx >= 0 && idx < modeCmds.size()) {
+            m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_SENSOR_SENSORLESS), 0.0);
             m_serial->sendFloatCommand(modeCmds[idx], static_cast<double>(idx));
         }
     });
     // 判断命令是否为无感 SMO 命令（用于波形互斥逻辑）
     const auto isNoSenseTrendCommand = [](int command) {
-        return command == static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE)
+        return command == static_cast<int>(SerialCommand::CMD_SPEED)
+            || command == static_cast<int>(SerialCommand::CMD_SPEEDOUT)
+            || command == static_cast<int>(SerialCommand::CMD_IQ_ID)
+            || command == static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE)
+            // 无感页的这些曲线允许多选，便于同时观察启动、速度环输出和 SMO/PLL 状态。
             || command == static_cast<int>(SerialCommand::CMD_SMO_ANGLE)
+            || command == static_cast<int>(SerialCommand::CMD_SMO_RAW_ANGLE)
             || command == static_cast<int>(SerialCommand::CMD_SMO_SPEED)
-            || command == static_cast<int>(SerialCommand::CMD_SMO_BACKEMF);
+            || command == static_cast<int>(SerialCommand::CMD_SMO_BACKEMF)
+            || command == static_cast<int>(SerialCommand::CMD_SMO_DIAG);
     };
 
     // ---- 波形订阅按钮通用信号绑定 ----
