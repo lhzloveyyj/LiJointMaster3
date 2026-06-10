@@ -116,4 +116,5 @@ enum class SerialCommand : uint8_t
     CMD_ELECTRICALANGLE = 0x51,          ///< 开启实际电角度回传（有感）
     CMD_ELECTRICALANGLE_CLOSE = 0x52,    ///< 关闭实际电角度回传
     CMD_SETIQMAX = 0x5A,                 ///< 设置 Iq 参考电流硬上限
+    CMD_VERIFY_OFFSET = 0x5B,            ///< 多点静态锁定验证零偏（回包6个误差值）
 };

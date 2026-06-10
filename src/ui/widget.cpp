@@ -448,6 +448,7 @@ Widget::Widget(QWidget *parent)
     , m_mosTempSlider(nullptr)
     , m_zeroOffsetEdit(nullptr)
     , m_elecAngleEdit(nullptr)
+    , m_verifyLabels{nullptr}
     , m_zeroCalibBtn(nullptr)
     , m_ctrlModeCombo(nullptr)
     , m_trendGroup(nullptr)
@@ -1059,14 +1060,41 @@ void Widget::buildUi()
     auto *rv = new QVBoxLayout(reserve);
     rv->setContentsMargins(8, 8, 8, 8);
     rv->setSpacing(6);
-    auto *zeroCalibBtn = makeBtn(QStringLiteral("零电位校准"), accentBrush, 28);
+    auto *calibRow = new QHBoxLayout;
+    auto *zeroCalibBtn = makeBtn(QStringLiteral("校准"), accentBrush, 28);
     zeroCalibBtn->setCheckable(true);
-    rv->addWidget(zeroCalibBtn);
+    zeroCalibBtn->setFixedWidth(60);
+    auto *verifyBtn = makeBtn(QStringLiteral("验证"), "#495b78", 28);
+    verifyBtn->setFixedWidth(60);
+    calibRow->addWidget(zeroCalibBtn);
+    calibRow->addWidget(verifyBtn);
+    calibRow->addStretch();
+    rv->addLayout(calibRow);
     auto *zeroOffsetEdit = makeInput("0.000");
     auto *elecAngleEdit = makeInput("0.000");
     auto *zr = new QHBoxLayout; zr->addWidget(new QLabel(QStringLiteral("零偏值"))); zr->addWidget(zeroOffsetEdit);
     auto *er = new QHBoxLayout; er->addWidget(new QLabel(QStringLiteral("电角度"))); er->addWidget(elecAngleEdit);
-    rv->addLayout(zr); rv->addLayout(er); rv->addStretch();
+    rv->addLayout(zr); rv->addLayout(er);
+    auto *verifyGrid = new QGridLayout;
+    verifyGrid->setContentsMargins(0, 0, 0, 0);
+    verifyGrid->setHorizontalSpacing(2);
+    verifyGrid->setVerticalSpacing(2);
+    const QStringList verifyNames = {QStringLiteral("0°"), QStringLiteral("60°"),
+                                     QStringLiteral("120°"), QStringLiteral("180°"),
+                                     QStringLiteral("240°"), QStringLiteral("300°")};
+    QLabel *verifyLabels[6];
+    for (int i = 0; i < 6; ++i) {
+        const int row = i / 2;
+        const int col = (i % 2) * 2;
+        auto *lbl = new QLabel(QStringLiteral("--"));
+        lbl->setStyleSheet(QString("color:%1;font-size:11px;").arg(th.subText));
+        lbl->setFixedWidth(44);
+        verifyGrid->addWidget(new QLabel(verifyNames[i]), row, col);
+        verifyGrid->addWidget(lbl, row, col + 1);
+        verifyLabels[i] = lbl;
+    }
+    rv->addLayout(verifyGrid);
+    rv->addStretch();
 
     // ---- 底部调试台 ----
     // 从左到右：零位校准 → 控制模式+波形按钮 → 目标值设置 → PID 参数设置
@@ -1254,6 +1282,7 @@ void Widget::buildUi()
     m_zeroCalibBtn = zeroCalibBtn;
     m_zeroOffsetEdit = zeroOffsetEdit;
     m_elecAngleEdit = elecAngleEdit;
+    for (int i = 0; i < 6; ++i) m_verifyLabels[i] = verifyLabels[i];
     m_ctrlModeCombo = cmode;
     m_mosTempText = mosVal;
     m_mosTempSlider = mos;
@@ -1340,6 +1369,17 @@ void Widget::buildUi()
             ? static_cast<int>(SerialCommand::CMD_ZEROCALIBRATIO)
             : static_cast<int>(SerialCommand::CMD_ZEROCALIBRATIO_OVER);
         m_serial->sendFloatCommand(cmd, 0.0);
+    });
+    connect(verifyBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) m_serial->playSystemAlert();
+            showSerialNotOpenTipDialog(this);
+            return;
+        }
+        for (int i = 0; i < 6; ++i) {
+            if (m_verifyLabels[i]) m_verifyLabels[i]->setText(QStringLiteral("..."));
+        }
+        m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_VERIFY_OFFSET), 0.0);
     });
     connect(cmode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
         if (!m_serial || !m_serial->isConnected()) {
@@ -1487,6 +1527,13 @@ void Widget::buildUi()
                 zeroCalibBtn->blockSignals(true);
                 zeroCalibBtn->setChecked(false);
                 zeroCalibBtn->blockSignals(false);
+            }
+        } else if (command == static_cast<int>(SerialCommand::CMD_VERIFY_OFFSET) && values.size() >= 6) {
+            for (int i = 0; i < 6; ++i) {
+                if (m_verifyLabels[i]) {
+                    double deg = values[i].toDouble() * 57.29578;
+                    m_verifyLabels[i]->setText(QString::number(deg, 'f', 1) + QStringLiteral("°"));
+                }
             }
         }
         appendTrendValues(command, values);

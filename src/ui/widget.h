@@ -142,6 +142,7 @@ private:
     QLineEdit *m_zeroOffsetEdit;         ///< 零偏值输入框
     QLineEdit *m_elecAngleEdit;          ///< 电角度输入框
     QPushButton *m_zeroCalibBtn;         ///< 零电位校准按钮
+    QLabel *m_verifyLabels[6];           ///< 6 点验证误差标签 (0°/60°/120°/180°/240°/300°)
 
     // ---- 波形控制 ----
     QComboBox *m_ctrlModeCombo;          ///< 控制模式选择（开环/电流/速度/位置）
