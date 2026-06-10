@@ -692,7 +692,7 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
                       | ((uint32_t)(int16_t)values[1].toInt() << 16);
         int vi = 2;
         auto r16 = [&]() -> double { return vi < values.size() ? (int16_t)values[vi++].toInt() : 0; };
-        if (mask & 1)    { m_plotManager->appendData("mechanicalAngle", r16()/1000.0); m_plotManager->appendData("correctedAngle", r16()/1000.0); }
+        if (mask & 1)    { m_plotManager->appendData("mechanicalAngle", r16()/1000.0); }
         if (mask & 2)    { m_plotManager->appendData("speed", r16()/10.0); }
         if (mask & 4)    { m_plotManager->appendData("speedOut", r16()/100.0); }
         if (mask & 8)    { m_plotManager->appendData("Ia", r16()/100.0); m_plotManager->appendData("Ib", r16()/100.0); m_plotManager->appendData("Ic", r16()/100.0); }
@@ -705,7 +705,7 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
         if (mask & 1024) { m_plotManager->appendData("local", r16()/1000.0); }
         if (mask & 2048) { m_plotManager->appendData("localOut", r16()/10.0); }
         if (mask & 4096) { m_plotManager->appendData("Ialpha", r16()/100.0); m_plotManager->appendData("Ibeta", r16()/100.0); }
-        if (mask & 8192) { m_plotManager->appendData("correctedAngle", r16()/1000.0); m_plotManager->appendData("mechanicalAngle", r16()/1000.0); }
+        if (mask & 8192) { m_plotManager->appendData("correctedAngle", r16()/1000.0); }
         break;
     }
     default:
@@ -1139,6 +1139,7 @@ void Widget::buildUi()
     wg->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     const QList<QPair<int, int>> waveCmds = {
         {static_cast<int>(SerialCommand::CMD_MECHANICALANGLE), static_cast<int>(SerialCommand::CMD_MECHANICALANGLE_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE), static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_ADC), static_cast<int>(SerialCommand::CMD_ADC_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_IALPHA_BETA), static_cast<int>(SerialCommand::CMD_IALPHA_BETA_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_UABC), static_cast<int>(SerialCommand::CMD_UABC_CLOSE)},
@@ -1154,7 +1155,7 @@ void Widget::buildUi()
         {static_cast<int>(SerialCommand::CMD_ADCVBUS), static_cast<int>(SerialCommand::CMD_ADCVBUS_CLOSE)}
     };
     QList<QPushButton *> trendButtons;
-    QStringList waves = {QStringLiteral("机械角度"), QStringLiteral("三相ADC"), QStringLiteral("IAlpha_B..."), QStringLiteral("三相电压..."), QStringLiteral("三相电流"), QStringLiteral("IQ_ID"), QStringLiteral("三相SVP..."), QStringLiteral("UAlpha_B..."), QStringLiteral("速度"), QStringLiteral("位置"), QStringLiteral("电流环输出"), QStringLiteral("速度环输出"), QStringLiteral("位置环输出"), QStringLiteral("母线ADC")};
+    QStringList waves = {QStringLiteral("机械角度"), QStringLiteral("电角度"), QStringLiteral("三相ADC"), QStringLiteral("IAlpha_B..."), QStringLiteral("三相电压..."), QStringLiteral("三相电流"), QStringLiteral("IQ_ID"), QStringLiteral("三相SVP..."), QStringLiteral("UAlpha_B..."), QStringLiteral("速度"), QStringLiteral("位置"), QStringLiteral("电流环输出"), QStringLiteral("速度环输出"), QStringLiteral("位置环输出"), QStringLiteral("母线ADC")};
     const QColor trendAccent(accentBrush);
     const QString trendNormalBg = "#1f2b41";
     const QString trendNormalBorder = "#5b76a3";
