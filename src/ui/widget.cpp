@@ -1405,7 +1405,7 @@ void Widget::buildUi()
         }
         m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_VERIFY_OFFSET), 0.0);
     });
-    connect(cmode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
+    connect(cmode, qOverload<int>(&QComboBox::activated), this, [this](int idx) {
         if (!m_serial || !m_serial->isConnected()) {
             return;
         }

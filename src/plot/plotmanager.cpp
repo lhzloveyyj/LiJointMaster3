@@ -38,6 +38,15 @@ PlotManager::PlotManager(QCustomPlot *plotWidget, QObject *parent)
     m_plot->xAxis->grid()->setPen(QPen(QColor(80, 80, 80)));
     m_plot->yAxis->grid()->setPen(QPen(QColor(80, 80, 80)));
 
+    // ---- 图例（右上角显示有数据的曲线名称和颜色） ----
+    m_plot->legend->setVisible(true);
+    m_plot->legend->setBrush(QColor(30, 30, 40, 200));
+    m_plot->legend->setBorderPen(QPen(QColor(60, 60, 80)));
+    m_plot->legend->setTextColor(Qt::white);
+    m_plot->legend->setFont(QFont("sans-serif", 9));
+    m_plot->legend->setSelectableParts(QCPLegend::spNone);
+    m_plot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignTop | Qt::AlignRight);
+
     // ---- 鼠标交互 ----
     // 启用鼠标拖拽平移（iRangeDrag）和滚轮缩放（iRangeZoom）
     m_plot->setInteraction(QCP::iRangeDrag);
@@ -81,9 +90,13 @@ void PlotManager::addGraph(const QString &name, const QColor &color)
     if (m_graphs.contains(name)) return;
 
     QCPGraph *graph = m_plot->addGraph();
-    graph->setPen(QPen(color));
+    QPen pen(color);
+    pen.setWidth(1);
+    graph->setPen(pen);
+    graph->setName(name);
+    graph->removeFromLegend();  /* 初始隐藏，有数据后再显示 */
 
-    m_graphs[name] = { graph, QVector<double>() };
+    m_graphs[name] = { graph, QVector<double>(), 0.0, false };
 }
 
 /**
@@ -102,9 +115,26 @@ void PlotManager::appendData(const QString &name, double value)
     m_key += 0.0005;
 
     GraphData &g = m_graphs[name];
+    g.lastKey = m_key;
     g.data.append(value);
 
     g.graph->addData(m_key, value);
+
+    /* 首次有数据时加入图例 */
+    if (!g.inLegend) {
+        g.graph->addToLegend();
+        g.inLegend = true;
+    }
+
+    /* 清理超过 3 秒无数据的曲线 */
+    const double threshold = m_key - 3.0;
+    for (auto &pair : m_graphs) {
+        GraphData &gd = pair;
+        if (gd.inLegend && gd.lastKey > 0 && gd.lastKey < threshold) {
+            gd.graph->removeFromLegend();
+            gd.inLegend = false;
+        }
+    }
 
     // X 轴右对齐：保持 m_key 在可视窗口右端
     m_plot->xAxis->setRange(m_key, m_xAxisRange, Qt::AlignRight);
