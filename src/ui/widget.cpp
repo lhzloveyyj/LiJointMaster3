@@ -575,6 +575,7 @@ void Widget::setupPlotGraphs()
     m_plotManager->addGraph("local", Qt::blue);
     m_plotManager->addGraph("localOut", Qt::yellow);
     m_plotManager->addGraph("adcvbus", Qt::green);
+    m_plotManager->addGraph("correctedAngle", QColor(255, 128, 0));
 
 }
 
@@ -605,7 +606,12 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
 
     switch (static_cast<SerialCommand>(command)) {
     case SerialCommand::CMD_MECHANICALANGLE:
-        m_plotManager->appendData("mechanicalAngle", valueAt(0));
+        if (values.size() >= 2) {
+            m_plotManager->appendData("mechanicalAngle", valueAt(0));
+            m_plotManager->appendData("correctedAngle", valueAt(1));
+        } else {
+            m_plotManager->appendData("mechanicalAngle", valueAt(0));
+        }
         break;
     case SerialCommand::CMD_UABC:
         if (values.size() >= 3) {
@@ -671,7 +677,12 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
         }
         break;
     case SerialCommand::CMD_ELECTRICALANGLE:
-        m_plotManager->appendData("electricalAngle", valueAt(0));
+        if (values.size() >= 2) {
+            m_plotManager->appendData("correctedAngle", valueAt(0));
+            m_plotManager->appendData("mechanicalAngle", valueAt(1));
+        } else {
+            m_plotManager->appendData("electricalAngle", valueAt(0));
+        }
         break;
     default:
         break;
