@@ -685,6 +685,29 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
             m_plotManager->appendData("electricalAngle", valueAt(0));
         }
         break;
+    case SerialCommand::CMD_TELEMETRY_BUNDLE: {
+        /* values[0..]: int16 数组，前2个是 mask 低16位+高16位 */
+        if (values.size() < 3) break;
+        uint32_t mask = ((uint32_t)(int16_t)values[0].toInt())
+                      | ((uint32_t)(int16_t)values[1].toInt() << 16);
+        int vi = 2;
+        auto r16 = [&]() -> double { return vi < values.size() ? (int16_t)values[vi++].toInt() : 0; };
+        if (mask & 1)    { m_plotManager->appendData("mechanicalAngle", r16()/1000.0); m_plotManager->appendData("correctedAngle", r16()/1000.0); }
+        if (mask & 2)    { m_plotManager->appendData("speed", r16()/10.0); }
+        if (mask & 4)    { m_plotManager->appendData("speedOut", r16()/100.0); }
+        if (mask & 8)    { m_plotManager->appendData("Ia", r16()/100.0); m_plotManager->appendData("Ib", r16()/100.0); m_plotManager->appendData("Ic", r16()/100.0); }
+        if (mask & 16)   { m_plotManager->appendData("Iq", r16()/100.0); m_plotManager->appendData("Id", r16()/100.0); }
+        if (mask & 32)   { m_plotManager->appendData("Ualpha", r16()/100.0); m_plotManager->appendData("Ubeta", r16()/100.0); }
+        if (mask & 64)   { m_plotManager->appendData("Ua", r16()/100.0); m_plotManager->appendData("Ub", r16()/100.0); m_plotManager->appendData("Uc", r16()/100.0); }
+        if (mask & 128)  { m_plotManager->appendData("ADC1", r16()); m_plotManager->appendData("ADC2", r16()); m_plotManager->appendData("ADC3", r16()); }
+        if (mask & 256)  { m_plotManager->appendData("Ta", r16()/10000.0); m_plotManager->appendData("Tb", r16()/10000.0); m_plotManager->appendData("Tc", r16()/10000.0); }
+        if (mask & 512)  { m_plotManager->appendData("adcvbus", r16()/100.0); }
+        if (mask & 1024) { m_plotManager->appendData("local", r16()/1000.0); }
+        if (mask & 2048) { m_plotManager->appendData("localOut", r16()/10.0); }
+        if (mask & 4096) { m_plotManager->appendData("Ialpha", r16()/100.0); m_plotManager->appendData("Ibeta", r16()/100.0); }
+        if (mask & 8192) { m_plotManager->appendData("correctedAngle", r16()/1000.0); m_plotManager->appendData("mechanicalAngle", r16()/1000.0); }
+        break;
+    }
     default:
         break;
     }
@@ -1413,31 +1436,10 @@ void Widget::buildUi()
             const int openCmd = m_trendOpenCmd.value(btn, -1);
             const int closeCmd = m_trendCloseCmd.value(btn, -1);
             if (checked) {
-                /* 单选互斥：关闭其他已选中的按钮 */
-                for (auto it2 = m_trendOpenCmd.constBegin(); it2 != m_trendOpenCmd.constEnd(); ++it2) {
-                    QPushButton *other = it2.key();
-                    if (other == btn || !other->isChecked()) {
-                        continue;
-                    }
-                    other->blockSignals(true);
-                    other->setChecked(false);
-                    other->blockSignals(false);
-                    const int otherCloseCmd = m_trendCloseCmd.value(other, -1);
-                    if (otherCloseCmd > 0) {
-                        m_serial->sendFloatCommand(otherCloseCmd, 0.0);
-                    }
-                    if (m_serial->property("activeTrendCommand").toInt() == m_trendOpenCmd.value(other, -1)) {
-                        m_serial->setProperty("activeTrendCommand", 0);
-                    }
-                }
                 m_serial->sendFloatCommand(openCmd, 0.0);
-                m_serial->setProperty("activeTrendCommand", openCmd);
             } else {
                 if (closeCmd > 0) {
                     m_serial->sendFloatCommand(closeCmd, 0.0);
-                }
-                if (m_serial->property("activeTrendCommand").toInt() == openCmd) {
-                    m_serial->setProperty("activeTrendCommand", 0);
                 }
             }
         });
