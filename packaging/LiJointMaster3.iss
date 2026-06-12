@@ -1,5 +1,5 @@
 #define MyAppName "LiJointMaster3"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "LiJointMaster3"
 #define MyAppExeName "LiJointMaster3.exe"
 #define MyAppAssocName MyAppName + " Application"
@@ -18,7 +18,7 @@ LicenseFile=
 InfoBeforeFile=
 InfoAfterFile=
 OutputDir=..\dist\installer
-OutputBaseFilename=LiJointMaster3-V1.1.0-Setup
+OutputBaseFilename=LiJointMaster3-V1.1.1-Setup
 SetupIconFile=assets\motor.ico
 Compression=lzma
 SolidCompression=yes

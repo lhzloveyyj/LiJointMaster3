@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "V1.1.0",
+    [string]$Version = "V1.1.1",
     [string]$WindowsInstallerPath = "dist\installer\LiJointMaster3-V1.1.0-Setup.exe",
     [string]$WindowsPortableDir = "dist\windows",
     [string]$LinuxPackagePath = "",
