@@ -89,6 +89,8 @@ private:
     struct GraphData {
         QCPGraph *graph;              ///< QCustomPlot 图形对象
         QVector<double> data;         ///< 数据点缓存（暂未使用）
+        double lastKey = 0;           ///< 上次数据的时间键（用于图例清理）
+        bool inLegend = false;        ///< 是否已加入图例
     };
 
     QMap<QString, GraphData> m_graphs; ///< 曲线名称 → 数据映射表

@@ -583,8 +583,8 @@ bool SerialManager::tryParseOneFrame(int &consumedBytes)
     const uint8_t cmd = static_cast<uint8_t>(m_rxBuffer[1]);  // 命令字
     const uint8_t len = static_cast<uint8_t>(m_rxBuffer[2]);  // 载荷长度
 
-    // 校验 LEN：必须 >0、≤128、且为 4 的倍数（float 数组对齐）
-    if (len == 0 || len > kMaxPayloadLen || (len % 4) != 0) {
+    // 校验 LEN：必须 >0、≤128、且为偶数
+    if (len == 0 || len > kMaxPayloadLen || (len % 2) != 0) {
         consumedBytes = 1;
         return true;
     }
@@ -611,14 +611,23 @@ bool SerialManager::tryParseOneFrame(int &consumedBytes)
         return true;
     }
 
-    // 提取载荷并解析为 QVariantList（float 数组）
+    // 提取载荷并解析
     const QByteArray payload = m_rxBuffer.mid(3, len);
-    const int count = len / 4;
-
     QVariantList values;
-    values.reserve(count);
-    for (int i = 0; i < count; ++i) {
-        values.push_back(bytesToFloat(payload, i * 4));
+
+    if (cmd == 0x5C) { /* CMD_TELEMETRY_BUNDLE: int16 payload */
+        const int count = len / 2;
+        values.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            int16_t v = (int16_t)((uint8_t)payload[i*2] | ((uint8_t)payload[i*2+1] << 8));
+            values.push_back((double)v);
+        }
+    } else { /* float32 payload */
+        const int count = len / 4;
+        values.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            values.push_back(bytesToFloat(payload, i * 4));
+        }
     }
 
     // 发射解析完成信号供 UI 层消费

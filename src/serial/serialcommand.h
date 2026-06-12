@@ -33,7 +33,7 @@ constexpr uint8_t FRAME_TAIL = 0x49;
  * - 0x08-0x19：电压/电流/ADC 采样与控制
  * - 0x20-0x27：控制模式切换与 PID 设置
  * - 0x28-0x45：速度/位置/PID 参数设置
- * - 0x46-0x59：SMO 无感观测、反馈源切换与扩展电机参数
+ * - 0x46-0x5A：ADC 采样、电机参数与反馈源
  *
  * 每个波形数据流都有一个 OPEN 和 CLOSE 配对命令，
  * 用于开启/关闭下位机的特定数据回传。
@@ -107,26 +107,16 @@ enum class SerialCommand : uint8_t
     CMD_SETSPEEDPIDOUT = 0x44,           ///< 设置速度环输出限制
     CMD_SETLOCALPIDOUT = 0x45,           ///< 设置位置环输出限制
 
-    /* ========== SMO 无感观测、反馈源切换与电机参数 (0x46-0x59) ========== */
+    /* ========== 反馈源切换与电机参数 (0x46-0x5A) ========== */
     CMD_ADCVBUS = 0x46,                  ///< 开启母线 ADC 原始值回传
     CMD_ADCVBUS_CLOSE = 0x47,            ///< 关闭母线 ADC 回传
-    CMD_SMO_ANGLE = 0x48,                ///< 开启 PLL 角度回传（SMO 反电势经 PLL 后）
-    CMD_SMO_ANGLE_CLOSE = 0x49,          ///< 关闭 PLL 角度回传
-    CMD_SMO_SPEED = 0x4A,                ///< 开启 SMO 观测速度回传（无感）
-    CMD_SMO_SPEED_CLOSE = 0x4B,          ///< 关闭 SMO 观测速度回传
-    CMD_SMO_BACKEMF = 0x4C,              ///< 开启 SMO 反电势 Eα/Eβ 回传（无感）
-    CMD_SMO_BACKEMF_CLOSE = 0x4D,        ///< 关闭 SMO 反电势回传
     CMD_SETMOTORRS = 0x4E,               ///< 设置电机相电阻 Rs（单位 Ω）
     CMD_SETMOTORLQ = 0x4F,               ///< 设置电机 q 轴电感 Lq（单位 H）
     CMD_SETMOTORLD = 0x50,               ///< 设置电机 d 轴电感 Ld（单位 H）
     CMD_ELECTRICALANGLE = 0x51,          ///< 开启实际电角度回传（有感）
     CMD_ELECTRICALANGLE_CLOSE = 0x52,    ///< 关闭实际电角度回传
-    CMD_SMO_RAW_ANGLE = 0x53,            ///< 开启 SMO 角度回传（反电势 atan2，不经 PLL）
-    CMD_SMO_RAW_ANGLE_CLOSE = 0x54,      ///< 关闭 SMO 角度回传
-    CMD_SMO_DIAG = 0x55,                 ///< 开启 SMO 诊断量回传（PLL误差/反电势幅值）
-    CMD_SMO_DIAG_CLOSE = 0x56,           ///< 关闭 SMO 诊断量回传
-    CMD_SMO_RESET = 0x57,                ///< 复位 SMO/PLL 状态
-    CMD_SENSOR_SENSORED = 0x58,          ///< 切换为有感控制（MT6701）
-    CMD_SENSOR_SENSORLESS = 0x59,        ///< 切换为无感控制（SMO+PLL）
     CMD_SETIQMAX = 0x5A,                 ///< 设置 Iq 参考电流硬上限
+    CMD_VERIFY_OFFSET = 0x5B,            ///< 多点静态锁定验证零偏（回包6个误差值）
+    CMD_TELEMETRY_BUNDLE = 0x5C,         ///< 合并遥测包（bitmask+values）
+    CMD_SETELECOFFSET = 0x60,            ///< 手动设置电角度零偏值（单位 rad）
 };

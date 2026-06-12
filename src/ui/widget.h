@@ -88,8 +88,6 @@ private:
     void buildBody(QVBoxLayout *mainV);                ///< 构建主体内容
     void buildSerialPanel(QWidget *container);         ///< 构建左侧串口配置面板
     void buildRightPanel(QWidget *container);          ///< 构建右侧面板
-    void buildModeSensePage(QWidget *page);            ///< 构建"有感"模式调试页
-    void buildModeNoSensePage(QWidget *page);          ///< 构建"无感"模式调试页
     void buildSettingsDialog();                        ///< 构建设置对话框
 
     /* ========== 主题与信号 ========== */
@@ -121,9 +119,7 @@ private:
     SerialManager *m_serial;             ///< 串口管理器
 
     // ---- 顶部栏 ----
-    QComboBox *m_modeCombo;              ///< 模式选择（有感/无感）
     QPushButton *m_settingsBtn;          ///< 设置按钮
-    QStackedWidget *m_modeStack;         ///< 模式堆栈页面
 
     // ---- 串口配置 ----
     QComboBox *m_portCombo;              ///< 串口号选择框
@@ -146,6 +142,7 @@ private:
     QLineEdit *m_zeroOffsetEdit;         ///< 零偏值输入框
     QLineEdit *m_elecAngleEdit;          ///< 电角度输入框
     QPushButton *m_zeroCalibBtn;         ///< 零电位校准按钮
+    QLabel *m_verifyLabels[6];           ///< 6 点验证误差标签 (0°/60°/120°/180°/240°/300°)
 
     // ---- 波形控制 ----
     QComboBox *m_ctrlModeCombo;          ///< 控制模式选择（开环/电流/速度/位置）
