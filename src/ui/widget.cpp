@@ -1077,27 +1077,32 @@ void Widget::buildUi()
     bottomL->setContentsMargins(4, 6, 4, 6);
     bottomL->setSpacing(3);
 
-    auto *reserve = new QGroupBox(QStringLiteral("预留参数框"));
-    reserve->setFixedWidth(166);
-    reserve->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-    auto *rv = new QVBoxLayout(reserve);
-    rv->setContentsMargins(8, 8, 8, 8);
-    rv->setSpacing(6);
+    auto *alignDialog = new QDialog(this);
+    alignDialog->setWindowTitle(QStringLiteral("预对准设置"));
+    alignDialog->setFixedSize(260, 340);
+    alignDialog->setWindowFlags(alignDialog->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    auto *dv = new QVBoxLayout(alignDialog);
+    dv->setContentsMargins(12, 12, 12, 12);
+    dv->setSpacing(8);
+
     auto *calibRow = new QHBoxLayout;
     auto *zeroCalibBtn = makeBtn(QStringLiteral("校准"), accentBrush, 28);
     zeroCalibBtn->setCheckable(true);
-    zeroCalibBtn->setFixedWidth(60);
+    zeroCalibBtn->setFixedWidth(80);
     auto *verifyBtn = makeBtn(QStringLiteral("验证"), "#495b78", 28);
-    verifyBtn->setFixedWidth(60);
+    verifyBtn->setFixedWidth(80);
     calibRow->addWidget(zeroCalibBtn);
     calibRow->addWidget(verifyBtn);
     calibRow->addStretch();
-    rv->addLayout(calibRow);
+    dv->addLayout(calibRow);
     auto *zeroOffsetEdit = makeInput("0.000");
     auto *elecAngleEdit = makeInput("0.000");
     auto *zr = new QHBoxLayout; zr->addWidget(new QLabel(QStringLiteral("零偏值"))); zr->addWidget(zeroOffsetEdit);
+    auto *setOffsetBtn = makeBtn(QStringLiteral("设置"), accentBrush, 26);
+    setOffsetBtn->setFixedWidth(44);
+    zr->addWidget(setOffsetBtn);
     auto *er = new QHBoxLayout; er->addWidget(new QLabel(QStringLiteral("电角度"))); er->addWidget(elecAngleEdit);
-    rv->addLayout(zr); rv->addLayout(er);
+    dv->addLayout(zr); dv->addLayout(er);
     auto *verifyGrid = new QGridLayout;
     verifyGrid->setContentsMargins(0, 0, 0, 0);
     verifyGrid->setHorizontalSpacing(2);
@@ -1116,8 +1121,24 @@ void Widget::buildUi()
         verifyGrid->addWidget(lbl, row, col + 1);
         verifyLabels[i] = lbl;
     }
-    rv->addLayout(verifyGrid);
+    dv->addLayout(verifyGrid);
+    dv->addStretch();
+
+    auto *reserve = new QGroupBox(QStringLiteral("预对准"));
+    reserve->setFixedWidth(166);
+    reserve->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    auto *rv = new QVBoxLayout(reserve);
+    rv->setContentsMargins(8, 8, 8, 8);
+    rv->setSpacing(6);
+    auto *preAlignBtn = makeBtn(QStringLiteral("预对齐"), accentBrush, 32);
+    rv->addWidget(preAlignBtn, 0, Qt::AlignCenter);
     rv->addStretch();
+
+    connect(preAlignBtn, &QPushButton::clicked, this, [alignDialog]() {
+        alignDialog->show();
+        alignDialog->raise();
+        alignDialog->activateWindow();
+    });
 
     // ---- 底部调试台 ----
     // 从左到右：零位校准 → 控制模式+波形按钮 → 目标值设置 → PID 参数设置
@@ -1404,6 +1425,15 @@ void Widget::buildUi()
             if (m_verifyLabels[i]) m_verifyLabels[i]->setText(QStringLiteral("..."));
         }
         m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_VERIFY_OFFSET), 0.0);
+    });
+    connect(setOffsetBtn, &QPushButton::clicked, this, [this, zeroOffsetEdit]() {
+        if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) m_serial->playSystemAlert();
+            showSerialNotOpenTipDialog(this);
+            return;
+        }
+        m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_SETELECOFFSET),
+                                   QLocale().toDouble(zeroOffsetEdit->text()));
     });
     connect(cmode, qOverload<int>(&QComboBox::activated), this, [this](int idx) {
         if (!m_serial || !m_serial->isConnected()) {

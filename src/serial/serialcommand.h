@@ -118,4 +118,5 @@ enum class SerialCommand : uint8_t
     CMD_SETIQMAX = 0x5A,                 ///< 设置 Iq 参考电流硬上限
     CMD_VERIFY_OFFSET = 0x5B,            ///< 多点静态锁定验证零偏（回包6个误差值）
     CMD_TELEMETRY_BUNDLE = 0x5C,         ///< 合并遥测包（bitmask+values）
+    CMD_SETELECOFFSET = 0x60,            ///< 手动设置电角度零偏值（单位 rad）
 };
