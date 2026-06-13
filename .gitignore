@@ -34,3 +34,8 @@ cmake_install.cmake
 Makefile
 
 LiJointMaster3_autogen/
+
+# 发布文件不受忽略规则影响
+!dist/**/*.exe
+!dist/**/*.dll
+!dist/**/*.a
