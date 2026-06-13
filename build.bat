@@ -1,5 +1,5 @@
 @echo off
-set "PATH=D:\down\QT\Tools\mingw1310_64\bin;D:\down\QT\Tools\CMake_64\bin;%PATH%"
+set "PATH=D:\down\QT\Tools\mingw1310_64\bin;C:\Program Files\CMake\bin;%PATH%"
 
 if not exist build\nul (
     echo === Configuring CMake ===
