@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(LiJointMaster3 VERSION 0.1 LANGUAGES CXX)
+project(LiJointMaster3 VERSION 1.1.1 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -9,11 +9,46 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets SerialPort PrintSupport)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets SerialPort PrintSupport)
+if(WIN32 AND MINGW)
+    get_filename_component(LIJOINT_MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    if(EXISTS "${LIJOINT_MINGW_BIN_DIR}")
+        set(LIJOINT_BUILD_PATH "${LIJOINT_MINGW_BIN_DIR};$ENV{PATH}")
+        string(REPLACE ";" "\\;" LIJOINT_BUILD_PATH_ESCAPED "${LIJOINT_BUILD_PATH}")
+        set(LIJOINT_PATH_LAUNCHER
+            "${CMAKE_COMMAND} -E env \"PATH=${LIJOINT_BUILD_PATH_ESCAPED}\"")
+        # Qt Creator's MinGW kit may invoke custom/compile steps without the MinGW
+        # bin directory in PATH, which prevents g++ from launching cc1plus.exe.
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE
+            "${LIJOINT_PATH_LAUNCHER}")
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_CUSTOM
+            "${LIJOINT_PATH_LAUNCHER}")
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK
+            "${LIJOINT_PATH_LAUNCHER}")
+        message(STATUS "Windows MinGW PATH injection enabled for build steps: ${LIJOINT_MINGW_BIN_DIR}")
+    endif()
+endif()
+
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets PrintSupport)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets PrintSupport)
+find_package(Qt${QT_VERSION_MAJOR} QUIET COMPONENTS SerialPort)
+
+set(LIJOINT_QT_LIBS
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::PrintSupport
+)
+
+if(TARGET Qt${QT_VERSION_MAJOR}::SerialPort)
+    list(APPEND LIJOINT_QT_LIBS Qt${QT_VERSION_MAJOR}::SerialPort)
+    set(LIJOINT_HAS_SERIALPORT ON)
+else()
+    set(LIJOINT_HAS_SERIALPORT OFF)
+    message(WARNING "Qt SerialPort was not found. Building LiJointMaster3 with a disabled serial backend.")
+endif()
 
 set(PROJECT_SOURCES
         src/app/main.cpp
+        src/app/appicon.rc
+        src/app/resources.qrc
         src/ui/widget.cpp
         src/ui/widget.h
         src/ui/widget.ui
@@ -55,7 +90,11 @@ target_include_directories(LiJointMaster3 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(LiJointMaster3 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::SerialPort Qt${QT_VERSION_MAJOR}::PrintSupport)
+target_link_libraries(LiJointMaster3 PRIVATE ${LIJOINT_QT_LIBS})
+
+target_compile_definitions(LiJointMaster3 PRIVATE
+    LIJOINT_HAS_SERIALPORT=$<BOOL:${LIJOINT_HAS_SERIALPORT}>
+)
 
 if(MINGW)
     target_compile_options(LiJointMaster3 PRIVATE -Wa,-mbig-obj)

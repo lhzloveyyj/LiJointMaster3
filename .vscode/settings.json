@@ -1,0 +1,15 @@
+{
+    "qt-core.qtInstallationRoot": "/home/lhz/Qt",
+    "qt-core.additionalQtPaths": [
+        "/home/lhz/Qt/6.11.0/gcc_64/bin/qtpaths"
+    ],
+    "qttools.searchMode": "path",
+    "qttools.extraSearchDirectories": [
+        "/home/lhz/Qt/6.11.0/gcc_64/bin"
+    ],
+    "cmake.generator": "Unix Makefiles",
+    "cmake.buildDirectory": "${workspaceFolder}/build/vscode-linux-debug",
+    "cmake.configureSettings": {
+        "CMAKE_PREFIX_PATH": "/home/lhz/Qt/6.11.0/gcc_64"
+    }
+}

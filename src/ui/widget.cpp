@@ -5,6 +5,30 @@
 #include "serial/serialcommand.h"
 #include "serial/serialmanager.h"
 
+/**
+ * @file widget.cpp
+ * @brief FOC 电机上位机主窗口实现
+ *
+ * 这是 LiJointMaster3 最大的源文件（约 1670 行），负责：
+ *
+ * 1. UI 构建：无边框窗口、6 主题 × 4 强调色切换、全动态布局
+ * 2. 信号绑定：串口通信 ↔ 界面控件的双向数据绑定
+ * 3. 协议路由：将串口回包解析结果分发到图表、参数回填、状态更新
+ * 4. 交互保护：未开串口时阻止操作、波形互斥、自动断连状态复位
+ *
+ * 布局结构：
+ * ┌──────────────────────────────────────────────┐
+ * │              自定义标题栏                      │
+ * ├──────────┬───────────────────────────────────┤
+ * │ 左侧面板  │       图表区 (QCustomPlot)        │
+ * │ 串口配置  │                                   │
+ * │ 电机参数  ├───────────────────────────────────┤
+ * │          │  底部调试台（零位/控制模式/PID等）  │
+ * └──────────┴───────────────────────────────────┘
+ *
+ * 注意：主题切换时 buildUi() 会被重新调用，完全重建界面。
+ */
+
 #include <QComboBox>
 #include <QColor>
 #include <QDesktopServices>
@@ -35,6 +59,15 @@
 #include <QWindow>
 
 namespace {
+// ============================================================================
+// 匿名命名空间：辅助函数和工具类
+// ============================================================================
+
+/**
+ * @brief 格式化数值，去掉无意义的末尾零和负零
+ *
+ * 例如：123.400000 → "123.4"，0.000000 → "0"
+ */
 QString formatCompactNumber(double value, int decimals = 6)
 {
     QString s = QString::number(value, 'f', decimals);
@@ -50,6 +83,18 @@ QString formatCompactNumber(double value, int decimals = 6)
     return s;
 }
 
+/**
+ * @brief 生成 QPushButton 的渐变样式表
+ *
+ * 根据基础颜色自动计算 normal/hover/pressed/checked 四种状态的颜色，
+ * 每个状态使用轻微的亮度变化和渐变效果。
+ *
+ * @param bg     基础背景色（十六进制，如 "#3f72b8"）
+ * @param text   文字颜色
+ * @param border 边框颜色
+ * @param radius 圆角半径
+ * @return 完整的 QPushButton 样式表字符串
+ */
 QString makeButtonStyle(const QString &bg, const QString &text, const QString &border, int radius = 6)
 {
     QColor base(bg);
@@ -82,6 +127,14 @@ QString makeButtonStyle(const QString &bg, const QString &text, const QString &b
         .arg(hoverTop, hoverBottom, pressTop, pressBottom, checkedTop, checkedBottom, checkedHoverTop, checkedHoverBottom, checkedPressTop, checkedPressBottom);
 }
 
+/**
+ * @brief 弹出"串口未打开"提示对话框
+ *
+ * 当用户尝试在串口未连接的情况下操作电机、波形或 PID 时，
+ * 显示一个风格化的提示框，引导用户先打开串口。
+ *
+ * 包含自定义标题栏、渐变背景和圆角。
+ */
 void showSerialNotOpenTipDialog(QWidget *parent)
 {
     QDialog dlg(parent);
@@ -135,6 +188,19 @@ void showSerialNotOpenTipDialog(QWidget *parent)
     dlg.exec();
 }
 
+/**
+ * @brief 按钮悬停/按压动画过滤器
+ *
+ * 使用 QPropertyAnimation 对 QPushButton 的 geometry 属性做动画，
+ * 实现悬停放大（1.02×）、按下缩小（0.90×）的"弹性"效果。
+ *
+ * 动画机制：
+ * - Enter 事件：按钮放大到 1.02 倍
+ * - Leave 事件：回复到 1.0 倍
+ * - Pressed 事件：缩小到 0.90 倍
+ * - Released 事件：根据鼠标位置恢复到 1.0 或 1.02 倍
+ * - 所有动画使用 OutCubic 缓动曲线，90~120ms 持续时间
+ */
 class ButtonMotionFilter final : public QObject
 {
 public:
@@ -163,6 +229,15 @@ public:
         return QObject::eventFilter(watched, event);
     }
 
+    /**
+     * @brief 动画缩放到指定比例
+     *
+     * 以按钮中心为基准，计算缩放后的目标矩形。
+     * 动画完成后自动清理。
+     *
+     * @param scale       缩放比例（1.0 = 原始大小）
+     * @param durationMs  动画时长（毫秒）
+     */
     void animateToScale(double scale, int durationMs)
     {
         QRect base = m_btn->property("_baseGeom").toRect();
@@ -183,9 +258,15 @@ public:
     }
 
 private:
-    QPushButton *m_btn;
+    QPushButton *m_btn;  ///< 被观察的按钮对象
 };
 
+/**
+ * @brief 自定义下拉框，使用三角形箭头替代系统默认箭头
+ *
+ * 重写 paintEvent 在右侧绘制一个自定义三角形箭头，
+ * 避免系统主题在不同平台上渲染不一致的问题。
+ */
 class ChevronComboBox final : public QComboBox
 {
 public:
@@ -200,6 +281,7 @@ protected:
         QComboBox::paintEvent(event);
         Q_UNUSED(event);
 
+        // 获取下拉框的箭头区域
         QStyleOptionComboBox option;
         initStyleOption(&option);
         const QRect arrowRect = style()->subControlRect(QStyle::CC_ComboBox, &option, QStyle::SC_ComboBoxArrow, this);
@@ -207,6 +289,7 @@ protected:
             return;
         }
 
+        // 在箭头区域绘制一个倒三角形（▼）
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
         painter.setPen(Qt::NoPen);
@@ -222,6 +305,12 @@ protected:
     }
 };
 
+/**
+ * @brief 为按钮安装弹跳动画效果
+ *
+ * 安装 ButtonMotionFilter 事件过滤器，并连接 pressed/released/toggled 信号，
+ * 实现按下缩小、松开弹回的动画效果。
+ */
 void installButtonBounce(QPushButton *btn)
 {
     auto *filter = new ButtonMotionFilter(btn);
@@ -229,16 +318,24 @@ void installButtonBounce(QPushButton *btn)
     btn->setProperty("_baseGeom", btn->geometry());
 
     QObject::connect(btn, &QPushButton::pressed, btn, [filter]() {
-        filter->animateToScale(0.90, 120);
+        filter->animateToScale(0.90, 120);  // 按下缩小到 90%
     });
     QObject::connect(btn, &QPushButton::released, btn, [btn, filter]() {
-        filter->animateToScale(btn->underMouse() ? 1.02 : 1.0, 120);
+        filter->animateToScale(btn->underMouse() ? 1.02 : 1.0, 120);  // 松手弹回
     });
     QObject::connect(btn, &QPushButton::toggled, btn, [btn, filter](bool) {
         filter->animateToScale(btn->underMouse() ? 1.02 : 1.0, 90);
     });
 }
 
+/**
+ * @brief 创建一个带渐变背景和圆角的卡片容器
+ *
+ * @param bg     背景色基础色
+ * @param border 边框颜色
+ * @param radius 圆角半径
+ * @return 样式化的 QFrame 卡片
+ */
 QFrame *makeCard(const QString &bg, const QString &border, int radius = 10)
 {
     auto *card = new QFrame;
@@ -260,6 +357,14 @@ QFrame *makeCard(const QString &bg, const QString &border, int radius = 10)
     return card;
 }
 
+/**
+ * @brief 创建一个通用操作按钮（带弹跳动画）
+ *
+ * @param text 按钮文字
+ * @param bg   基础背景色
+ * @param h    最小高度
+ * @return 样式化的 QPushButton
+ */
 QPushButton *makeBtn(const QString &text, const QString &bg, int h = 30)
 {
     auto *btn = new QPushButton(text);
@@ -269,6 +374,16 @@ QPushButton *makeBtn(const QString &text, const QString &bg, int h = 30)
     return btn;
 }
 
+/**
+ * @brief 创建标题栏小按钮（关闭/最小化用）
+ *
+ * 按钮尺寸固定为 26×26，带圆形悬停高亮效果。
+ *
+ * @param text    按钮文字（如 "×"）
+ * @param bg      正常背景色
+ * @param hoverBg 悬停背景色
+ * @return 样式化的 QPushButton
+ */
 QPushButton *makeTitleBarBtn(const QString &text, const QString &bg, const QString &hoverBg)
 {
     auto *btn = new QPushButton(text);
@@ -282,6 +397,12 @@ QPushButton *makeTitleBarBtn(const QString &text, const QString &bg, const QStri
     return btn;
 }
 
+/**
+ * @brief 创建一个输入框
+ *
+ * @param ph 占位提示文本
+ * @return QLineEdit 指针
+ */
 QLineEdit *makeInput(const QString &ph)
 {
     auto *e = new QLineEdit;
@@ -290,6 +411,11 @@ QLineEdit *makeInput(const QString &ph)
     return e;
 }
 
+/**
+ * @brief 创建一个自定义下拉框（带三角形箭头）
+ *
+ * @return ChevronComboBox 指针
+ */
 QComboBox *makeCombo()
 {
     auto *c = new ChevronComboBox;
@@ -298,13 +424,15 @@ QComboBox *makeCombo()
 }
 }
 
+// ============================================================================
+// Widget 构造函数
+// ============================================================================
+
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget)
-    , m_serial(new SerialManager(this))
-    , m_modeCombo(nullptr)
+    , m_serial(new SerialManager(this))     // 创建串口管理器（自动开始 300ms 轮询）
     , m_settingsBtn(nullptr)
-    , m_modeStack(nullptr)
     , m_portCombo(nullptr)
     , m_baudCombo(nullptr)
     , m_openCloseBtn(nullptr)
@@ -320,6 +448,7 @@ Widget::Widget(QWidget *parent)
     , m_mosTempSlider(nullptr)
     , m_zeroOffsetEdit(nullptr)
     , m_elecAngleEdit(nullptr)
+    , m_verifyLabels{nullptr}
     , m_zeroCalibBtn(nullptr)
     , m_ctrlModeCombo(nullptr)
     , m_trendGroup(nullptr)
@@ -328,18 +457,20 @@ Widget::Widget(QWidget *parent)
     , m_plotWidget(nullptr)
     , m_plotManager(nullptr)
     , m_plotRangeSlider(nullptr)
+    , m_pauseBtn(nullptr)
     , m_settingsDialog(nullptr)
     , m_themeCombo(nullptr)
     , m_dragHandle(nullptr)
     , m_dragging(false)
     , m_dragOffset()
-    , m_themeIndex(0)
-    , m_accentIndex(0)
+    , m_themeIndex(0)          // 默认蓝色主题
+    , m_accentIndex(0)         // 默认蓝色强调色
     , m_themeRebuildScheduled(false)
 {
+    // 无边框窗口
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     ui->setupUi(this);
-    buildUi();
+    buildUi();  // 构建完整 UI
 }
 
 Widget::~Widget()
@@ -347,8 +478,21 @@ Widget::~Widget()
     delete ui;
 }
 
+// ============================================================================
+// 事件过滤器 —— 实现无边框窗口拖动
+// ============================================================================
+
+/**
+ * @brief 事件过滤器：实现标题栏拖拽窗口
+ *
+ * 捕获 m_dragHandle（标题栏）上的 MouseButtonPress / MouseMove / MouseButtonRelease
+ * 事件，计算拖拽偏移量并调用 move() 实现无边框窗口拖动。
+ *
+ * 在 Wayland 下优先使用 startSystemMove() 实现原生窗口拖动。
+ */
 bool Widget::eventFilter(QObject *watched, QEvent *event)
 {
+    // 只处理 m_dragHandle 及其子控件上的事件
     const bool isDragTarget = watched == m_dragHandle
         || (m_dragHandle && watched && watched->parent() == m_dragHandle);
     if (!isDragTarget) {
@@ -386,12 +530,28 @@ bool Widget::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+// ============================================================================
+// 图表曲线注册 —— 注册所有 FOC 调试曲线到 PlotManager
+// ============================================================================
+
+/**
+ * @brief 注册所有图表曲线到 PlotManager
+ *
+ * 有感模式：
+ *   mechanicalAngle, Ua/Ub/Uc, ADC1/2/3, Ta/Tb/Tc, Ia/Ib/Ic,
+ *   Ualpha/Ubeta, Ialpha/Ibeta, Iq/Id, speed/speedOut,
+ *   local/localOut, adcvbus, electricalAngle
+ *
+ * 曲线名称必须与 appendTrendValues() 中引用的一致。
+ */
 void Widget::setupPlotGraphs()
 {
     if (!m_plotManager) {
         return;
     }
 
+    // 有感 FOC 调试曲线：这些名字必须和 appendTrendValues() 里的写入名字一致。
+    // PlotManager 会按名字找到对应曲线，因此新增串口数据流时要同时在这里注册曲线。
     m_plotManager->addGraph("mechanicalAngle", Qt::red);
     m_plotManager->addGraph("Ua", Qt::red);
     m_plotManager->addGraph("Ub", Qt::green);
@@ -415,8 +575,26 @@ void Widget::setupPlotGraphs()
     m_plotManager->addGraph("speedOut", Qt::magenta);
     m_plotManager->addGraph("local", Qt::blue);
     m_plotManager->addGraph("localOut", Qt::yellow);
+    m_plotManager->addGraph("adcvbus", Qt::green);
+    m_plotManager->addGraph("correctedAngle", QColor(255, 128, 0));
+
 }
 
+// ============================================================================
+// 趋势数据分发 —— 将串口回包数据写入对应图表曲线
+// ============================================================================
+
+/**
+ * @brief 根据串口命令字，将回包数据分发到对应的图表曲线
+ *
+ * 命令字与曲线的映射关系：
+ * - 单值命令（机械角度、速度、位置等）→ 一条曲线
+ * - 双值命令（Uα/Uβ、Iα/Iβ、Iq/Id 等）→ 两条曲线
+ * - 三值命令（三相电压、电流、ADC 等）→ 三条曲线
+ *
+ * @param command 串口命令字
+ * @param values  解析出的 float 值列表
+ */
 void Widget::appendTrendValues(int command, const QVariantList &values)
 {
     if (!m_plotManager || values.isEmpty()) {
@@ -429,7 +607,12 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
 
     switch (static_cast<SerialCommand>(command)) {
     case SerialCommand::CMD_MECHANICALANGLE:
-        m_plotManager->appendData("mechanicalAngle", valueAt(0));
+        if (values.size() >= 2) {
+            m_plotManager->appendData("mechanicalAngle", valueAt(0));
+            m_plotManager->appendData("correctedAngle", valueAt(1));
+        } else {
+            m_plotManager->appendData("mechanicalAngle", valueAt(0));
+        }
         break;
     case SerialCommand::CMD_UABC:
         if (values.size() >= 3) {
@@ -489,11 +672,70 @@ void Widget::appendTrendValues(int command, const QVariantList &values)
     case SerialCommand::CMD_LOCALOUT:
         m_plotManager->appendData("localOut", valueAt(0));
         break;
+    case SerialCommand::CMD_ADCVBUS:
+        if (m_serial && m_serial->property("activeTrendCommand").toInt() == static_cast<int>(SerialCommand::CMD_ADCVBUS)) {
+            m_plotManager->appendData("adcvbus", valueAt(0));
+        }
+        break;
+    case SerialCommand::CMD_ELECTRICALANGLE:
+        if (values.size() >= 2) {
+            m_plotManager->appendData("correctedAngle", valueAt(0));
+            m_plotManager->appendData("mechanicalAngle", valueAt(1));
+        } else {
+            m_plotManager->appendData("electricalAngle", valueAt(0));
+        }
+        break;
+    case SerialCommand::CMD_TELEMETRY_BUNDLE: {
+        /* values[0..]: int16 数组，前2个是 mask 低16位+高16位 */
+        if (values.size() < 3) break;
+        uint32_t mask = ((uint32_t)(int16_t)values[0].toInt())
+                      | ((uint32_t)(int16_t)values[1].toInt() << 16);
+        int vi = 2;
+        auto r16 = [&]() -> double { return vi < values.size() ? (int16_t)values[vi++].toInt() : 0; };
+        if (mask & 1)    { m_plotManager->appendData("mechanicalAngle", r16()/1000.0); }
+        if (mask & 2)    { m_plotManager->appendData("speed", r16()/10.0); }
+        if (mask & 4)    { m_plotManager->appendData("speedOut", r16()/100.0); }
+        if (mask & 8)    { m_plotManager->appendData("Ia", r16()/100.0); m_plotManager->appendData("Ib", r16()/100.0); m_plotManager->appendData("Ic", r16()/100.0); }
+        if (mask & 16)   { m_plotManager->appendData("Iq", r16()/100.0); m_plotManager->appendData("Id", r16()/100.0); }
+        if (mask & 32)   { m_plotManager->appendData("Ualpha", r16()/100.0); m_plotManager->appendData("Ubeta", r16()/100.0); }
+        if (mask & 64)   { m_plotManager->appendData("Ua", r16()/100.0); m_plotManager->appendData("Ub", r16()/100.0); m_plotManager->appendData("Uc", r16()/100.0); }
+        if (mask & 128)  { m_plotManager->appendData("ADC1", r16()); m_plotManager->appendData("ADC2", r16()); m_plotManager->appendData("ADC3", r16()); }
+        if (mask & 256)  { m_plotManager->appendData("Ta", r16()/10000.0); m_plotManager->appendData("Tb", r16()/10000.0); m_plotManager->appendData("Tc", r16()/10000.0); }
+        if (mask & 512)  { m_plotManager->appendData("adcvbus", r16()/100.0); }
+        if (mask & 1024) { m_plotManager->appendData("local", r16()/1000.0); }
+        if (mask & 2048) { m_plotManager->appendData("localOut", r16()/10.0); }
+        if (mask & 4096) { m_plotManager->appendData("Ialpha", r16()/100.0); m_plotManager->appendData("Ibeta", r16()/100.0); }
+        if (mask & 8192) { m_plotManager->appendData("correctedAngle", r16()/1000.0); }
+        break;
+    }
     default:
         break;
     }
 }
 
+// ============================================================================
+// buildUi —— 核心 UI 构建函数
+// ============================================================================
+
+/**
+ * @brief 构建（或重建）完整用户界面
+ *
+ * 本函数在以下情况被调用：
+ * 1. Widget 构造时
+ * 2. 用户切换主题或强调色时
+ *
+ * 重建流程：
+ * 1. 断开旧串口信号连接，避免重复绑定
+ * 2. 清空命令映射表和 UI 指针
+ * 3. 根据当前主题索引加载配色方案并生成全局样式表
+ * 4. 清空旧布局中的所有子控件
+ * 5. 重建：标题栏 → 左侧面板（串口+电机）→ 右侧面板（图表+调试台）
+ * 6. 绑定额外的信号/槽
+ * 7. 刷新串口列表
+ *
+ * 注意：主题切换时界面完全重建，所有 UI 指针需要重新赋值。
+ *       旧控件通过递归删除布局项来自动析构。
+ */
 void Widget::buildUi()
 {
     if (m_serial) {
@@ -506,6 +748,9 @@ void Widget::buildUi()
     m_plotManager = nullptr;
     m_plotRangeSlider = nullptr;
 
+    // ---- 主题配色定义 ----
+    // 6 套主题轮换：蓝色(默认)、浅色、纯黑、绿色、暖色、紫色
+    // 每套主题包含窗口背景、面板背景、卡片背景、边框、主文字、副文字色
     struct Theme {
         QString windowBg;
         QString panelBg;
@@ -516,13 +761,14 @@ void Widget::buildUi()
     };
 
     const QList<Theme> themes = {
-        {"#0d1423", "#15213a", "#223150", "#6d88bb", "#f4f8ff", "#cbd8f6"},
-        {"#eaf3ff", "#f8fbff", "#ffffff", "#9db7da", "#2a4268", "#6780a8"},
-        {"#0b0b0b", "#121212", "#1a1a1a", "#4a4a4a", "#f5f5f5", "#c8c8c8"},
-        {"#112018", "#193126", "#254535", "#6fa98b", "#eefdf4", "#b8ddc7"},
-        {"#241712", "#35211a", "#4a2d24", "#c58763", "#fff4ee", "#e8bfaa"},
-        {"#1c1730", "#282046", "#382c61", "#9787df", "#faf6ff", "#d7cbf7"}
+        {"#0d1423", "#15213a", "#223150", "#6d88bb", "#f4f8ff", "#cbd8f6"},  // 蓝色（默认）
+        {"#eaf3ff", "#f8fbff", "#ffffff", "#9db7da", "#2a4268", "#6780a8"},  // 浅色
+        {"#0b0b0b", "#121212", "#1a1a1a", "#4a4a4a", "#f5f5f5", "#c8c8c8"},  // 纯黑
+        {"#112018", "#193126", "#254535", "#6fa98b", "#eefdf4", "#b8ddc7"},  // 绿色
+        {"#241712", "#35211a", "#4a2d24", "#c58763", "#fff4ee", "#e8bfaa"},  // 暖色
+        {"#1c1730", "#282046", "#382c61", "#9787df", "#faf6ff", "#d7cbf7"}   // 紫色
     };
+    // 4 种强调色：蓝色、绿色、橙色、红色
     const QList<QString> accents = {"#5d93ff", "#59d98d", "#ffbf69", "#ff7f96"};
 
     const Theme th = themes[qBound(0, m_themeIndex, themes.size() - 1)];
@@ -608,22 +854,19 @@ void Widget::buildUi()
                                 .arg(accent.lighter(120).name(QColor::HexRgb), th.windowBg, borderHi));
     titleTag->installEventFilter(this);
 
-    auto *mode = makeCombo();
-    mode->addItems({QStringLiteral("有感"), QStringLiteral("无感")});
-    mode->setFixedWidth(108);
-
     auto *settingsBtn = makeBtn(QStringLiteral("设置"), accentBrush, 28);
     settingsBtn->setFixedWidth(60);
     m_settingsBtn = settingsBtn;
+    auto *minimizeBtn = makeTitleBarBtn(QStringLiteral("—"), "rgba(255,255,255,0.10)", "#5d93ff");
     auto *closeBtn = makeTitleBarBtn(QStringLiteral("×"), "rgba(255,255,255,0.10)", "#ff6f84");
 
     topL->addWidget(mark);
     topL->addWidget(title);
     topL->addWidget(titleTag);
     topL->addSpacing(10);
-    topL->addWidget(mode);
     topL->addWidget(settingsBtn);
     topL->addStretch();
+    topL->addWidget(minimizeBtn);
     topL->addWidget(closeBtn);
 
     mainV->addWidget(topBar);
@@ -653,7 +896,7 @@ void Widget::buildUi()
         sg->addWidget(w, r, 1);
     };
 
-    auto *com = makeCombo(); com->addItems({"COM6", "COM5"});
+    auto *com = makeCombo();
     auto *baud = makeCombo(); baud->addItems({"4000000", "2000000", "921600", "115200"});
     auto *db = makeCombo(); db->addItems({"8", "7"});
     auto *sb = makeCombo(); sb->addItems({"1", "1.5", "2"});
@@ -709,9 +952,9 @@ void Widget::buildUi()
 
     // 这三项必须满足：按钮宽 + 间隔 + 输入框宽 <= 当前行可用宽度
     // 否则布局会挤压，视觉上看起来像“没有空隙”。
-    const int kMotorBtnW = 84;
-    const int kMotorEditW = 54;
-    const int kMotorGap = 12;
+    const int kMotorBtnW = 99;
+    const int kMotorEditW = 79;
+    const int kMotorGap = 7;
     auto showSerialNotOpenTip = [this]() {
         if (m_serial) {
             m_serial->playSystemAlert();
@@ -721,12 +964,12 @@ void Widget::buildUi()
         }
         showSerialNotOpenTipDialog(this);
     };
-    auto motorRow = [&](const QString &t, int command) {
+    auto motorRow = [&](const QString &t, int command, const QString &defaultValue = QStringLiteral("0")) {
         auto *r = new QHBoxLayout;
         r->setContentsMargins(2, 0, 2, 0);
         r->setSpacing(0);
         auto *btn = makeBtn(t, accentBrush, 28);
-        auto *edit = makeInput("0");
+        auto *edit = makeInput(defaultValue);
         auto *gap = new QWidget;
         gap->setFixedWidth(kMotorGap);
         gap->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
@@ -753,10 +996,9 @@ void Widget::buildUi()
     motorRow(QStringLiteral("设置极对数"), static_cast<int>(SerialCommand::CMD_SETPAIRS));
     motorRow(QStringLiteral("设置角度方向"), static_cast<int>(SerialCommand::CMD_SETDIR));
     motorRow(QStringLiteral("设置速度方向"), static_cast<int>(SerialCommand::CMD_SETSPEEDDIR));
-
-    auto *vbus = makeInput("0.0");
-    vbus->setPlaceholderText(QStringLiteral("母线电压"));
-    mv->addWidget(vbus);
+    motorRow(QStringLiteral("设置Rs"), static_cast<int>(SerialCommand::CMD_SETMOTORRS), QStringLiteral("0.198"));
+    motorRow(QStringLiteral("设置Lq"), static_cast<int>(SerialCommand::CMD_SETMOTORLQ), QStringLiteral("0.000074"));
+    motorRow(QStringLiteral("设置Ld"), static_cast<int>(SerialCommand::CMD_SETMOTORLD), QStringLiteral("0.000040"));
 
     auto *mosTitle = new QHBoxLayout;
     mosTitle->setContentsMargins(0, 2, 0, 0);
@@ -818,6 +1060,15 @@ void Widget::buildUi()
     rangeRow->addWidget(plotRangeSlider, 1);
     rangeRow->addWidget(rangeHint);
 
+    m_pauseBtn = makeBtn(QStringLiteral("暂停"), accentBrush, 28);
+    m_pauseBtn->setCheckable(true);
+    m_pauseBtn->setFixedWidth(64);
+    connect(m_pauseBtn, &QPushButton::toggled, [this](bool checked) {
+        m_pauseBtn->setText(checked ? QStringLiteral("继续") : QStringLiteral("暂停"));
+        if (m_plotManager) m_plotManager->setPaused(checked);
+    });
+    rangeRow->addWidget(m_pauseBtn);
+
     chartV->addWidget(plotFrame, 1);
     chartV->addLayout(rangeRow);
 
@@ -826,20 +1077,72 @@ void Widget::buildUi()
     bottomL->setContentsMargins(4, 6, 4, 6);
     bottomL->setSpacing(3);
 
-    auto *reserve = new QGroupBox(QStringLiteral("预留参数框"));
+    auto *alignDialog = new QDialog(this);
+    alignDialog->setWindowTitle(QStringLiteral("预对准设置"));
+    alignDialog->setFixedSize(260, 340);
+    alignDialog->setWindowFlags(alignDialog->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    auto *dv = new QVBoxLayout(alignDialog);
+    dv->setContentsMargins(12, 12, 12, 12);
+    dv->setSpacing(8);
+
+    auto *calibRow = new QHBoxLayout;
+    auto *zeroCalibBtn = makeBtn(QStringLiteral("校准"), accentBrush, 28);
+    zeroCalibBtn->setCheckable(true);
+    zeroCalibBtn->setFixedWidth(80);
+    auto *verifyBtn = makeBtn(QStringLiteral("验证"), "#495b78", 28);
+    verifyBtn->setFixedWidth(80);
+    calibRow->addWidget(zeroCalibBtn);
+    calibRow->addWidget(verifyBtn);
+    calibRow->addStretch();
+    dv->addLayout(calibRow);
+    auto *zeroOffsetEdit = makeInput("0.000");
+    auto *elecAngleEdit = makeInput("0.000");
+    auto *zr = new QHBoxLayout; zr->addWidget(new QLabel(QStringLiteral("零偏值"))); zr->addWidget(zeroOffsetEdit);
+    auto *setOffsetBtn = makeBtn(QStringLiteral("设置"), accentBrush, 26);
+    setOffsetBtn->setFixedWidth(44);
+    zr->addWidget(setOffsetBtn);
+    auto *er = new QHBoxLayout; er->addWidget(new QLabel(QStringLiteral("电角度"))); er->addWidget(elecAngleEdit);
+    dv->addLayout(zr); dv->addLayout(er);
+    auto *verifyGrid = new QGridLayout;
+    verifyGrid->setContentsMargins(0, 0, 0, 0);
+    verifyGrid->setHorizontalSpacing(2);
+    verifyGrid->setVerticalSpacing(2);
+    const QStringList verifyNames = {QStringLiteral("0°"), QStringLiteral("60°"),
+                                     QStringLiteral("120°"), QStringLiteral("180°"),
+                                     QStringLiteral("240°"), QStringLiteral("300°")};
+    QLabel *verifyLabels[6];
+    for (int i = 0; i < 6; ++i) {
+        const int row = i / 2;
+        const int col = (i % 2) * 2;
+        auto *lbl = new QLabel(QStringLiteral("--"));
+        lbl->setStyleSheet(QString("color:%1;font-size:11px;").arg(th.subText));
+        lbl->setFixedWidth(44);
+        verifyGrid->addWidget(new QLabel(verifyNames[i]), row, col);
+        verifyGrid->addWidget(lbl, row, col + 1);
+        verifyLabels[i] = lbl;
+    }
+    dv->addLayout(verifyGrid);
+    dv->addStretch();
+
+    auto *reserve = new QGroupBox(QStringLiteral("预对准"));
     reserve->setFixedWidth(166);
     reserve->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     auto *rv = new QVBoxLayout(reserve);
     rv->setContentsMargins(8, 8, 8, 8);
     rv->setSpacing(6);
-    auto *zeroCalibBtn = makeBtn(QStringLiteral("零电位校准"), accentBrush, 28);
-    zeroCalibBtn->setCheckable(true);
-    rv->addWidget(zeroCalibBtn);
-    auto *zeroOffsetEdit = makeInput("0.000");
-    auto *elecAngleEdit = makeInput("0.000");
-    auto *zr = new QHBoxLayout; zr->addWidget(new QLabel(QStringLiteral("零偏值"))); zr->addWidget(zeroOffsetEdit);
-    auto *er = new QHBoxLayout; er->addWidget(new QLabel(QStringLiteral("电角度"))); er->addWidget(elecAngleEdit);
-    rv->addLayout(zr); rv->addLayout(er); rv->addStretch();
+    auto *preAlignBtn = makeBtn(QStringLiteral("预对齐"), accentBrush, 32);
+    rv->addWidget(preAlignBtn, 0, Qt::AlignCenter);
+    rv->addStretch();
+
+    connect(preAlignBtn, &QPushButton::clicked, this, [alignDialog]() {
+        alignDialog->show();
+        alignDialog->raise();
+        alignDialog->activateWindow();
+    });
+
+    // ---- 底部调试台 ----
+    // 从左到右：零位校准 → 控制模式+波形按钮 → 目标值设置 → PID 参数设置
+    // 波形按钮采用单选互斥逻辑，按下时发送 OPEN 命令，关闭时发送 CLOSE 命令
 
     auto *control = new QGroupBox(QStringLiteral("控制模式选择"));
     control->setFixedWidth(290);
@@ -857,6 +1160,7 @@ void Widget::buildUi()
     wg->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     const QList<QPair<int, int>> waveCmds = {
         {static_cast<int>(SerialCommand::CMD_MECHANICALANGLE), static_cast<int>(SerialCommand::CMD_MECHANICALANGLE_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE), static_cast<int>(SerialCommand::CMD_ELECTRICALANGLE_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_ADC), static_cast<int>(SerialCommand::CMD_ADC_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_IALPHA_BETA), static_cast<int>(SerialCommand::CMD_IALPHA_BETA_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_UABC), static_cast<int>(SerialCommand::CMD_UABC_CLOSE)},
@@ -868,10 +1172,11 @@ void Widget::buildUi()
         {static_cast<int>(SerialCommand::CMD_LOCAL), static_cast<int>(SerialCommand::CMD_LOCAL_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_IQ_ID), static_cast<int>(SerialCommand::CMD_IQ_ID_CLOSE)},
         {static_cast<int>(SerialCommand::CMD_SPEEDOUT), static_cast<int>(SerialCommand::CMD_SPEEDOUT_CLOSE)},
-        {static_cast<int>(SerialCommand::CMD_LOCALOUT), static_cast<int>(SerialCommand::CMD_LOCALOUT_CLOSE)}
+        {static_cast<int>(SerialCommand::CMD_LOCALOUT), static_cast<int>(SerialCommand::CMD_LOCALOUT_CLOSE)},
+        {static_cast<int>(SerialCommand::CMD_ADCVBUS), static_cast<int>(SerialCommand::CMD_ADCVBUS_CLOSE)}
     };
     QList<QPushButton *> trendButtons;
-    QStringList waves = {QStringLiteral("机械角度"), QStringLiteral("三相ADC"), QStringLiteral("IAlpha_B..."), QStringLiteral("三相电压..."), QStringLiteral("三相电流"), QStringLiteral("IQ_ID"), QStringLiteral("三相SVP..."), QStringLiteral("UAlpha_B..."), QStringLiteral("速度"), QStringLiteral("位置"), QStringLiteral("电流环输出"), QStringLiteral("速度环输出"), QStringLiteral("位置环输出")};
+    QStringList waves = {QStringLiteral("机械角度"), QStringLiteral("电角度"), QStringLiteral("三相ADC"), QStringLiteral("IAlpha_B..."), QStringLiteral("三相电压..."), QStringLiteral("三相电流"), QStringLiteral("IQ_ID"), QStringLiteral("三相SVP..."), QStringLiteral("UAlpha_B..."), QStringLiteral("速度"), QStringLiteral("位置"), QStringLiteral("电流环输出"), QStringLiteral("速度环输出"), QStringLiteral("位置环输出"), QStringLiteral("母线ADC")};
     const QColor trendAccent(accentBrush);
     const QString trendNormalBg = "#1f2b41";
     const QString trendNormalBorder = "#5b76a3";
@@ -1004,31 +1309,13 @@ void Widget::buildUi()
     bottomL->addWidget(target);
     bottomL->addWidget(pid, 1);
 
-    auto *noSenseCard = makeCard(th.cardBg, th.border, 10);
-    auto *noSenseV = new QVBoxLayout(noSenseCard);
-    noSenseV->setContentsMargins(10, 10, 10, 10);
-    auto *noSenseHint = new QLabel(QStringLiteral("无感控制区域（预留）"));
-    noSenseHint->setAlignment(Qt::AlignCenter);
-    noSenseHint->setStyleSheet(QString("color:%1;font-size:16px;font-weight:600;").arg(th.subText));
-    noSenseV->addStretch();
-    noSenseV->addWidget(noSenseHint);
-    noSenseV->addStretch();
-
-    auto *modeStack = new QStackedWidget;
-    modeStack->addWidget(bottomCard);
-    modeStack->addWidget(noSenseCard);
-    modeStack->setCurrentIndex(qBound(0, mode->currentIndex(), 1));
-
-    // 调整上下区域比例：底部块整体下压并压缩（约减少 50px 视觉高度）
     rightV->addWidget(chartCard, 2);
-    rightV->addWidget(modeStack, 1);
+    rightV->addWidget(bottomCard, 1);
 
     body->addWidget(left);
     body->addWidget(right, 1);
     mainV->addLayout(body, 1);
 
-    m_modeCombo = mode;
-    m_modeStack = modeStack;
     m_portCombo = com;
     m_baudCombo = baud;
     m_openCloseBtn = openSerialBtn;
@@ -1040,6 +1327,7 @@ void Widget::buildUi()
     m_zeroCalibBtn = zeroCalibBtn;
     m_zeroOffsetEdit = zeroOffsetEdit;
     m_elecAngleEdit = elecAngleEdit;
+    for (int i = 0; i < 6; ++i) m_verifyLabels[i] = verifyLabels[i];
     m_ctrlModeCombo = cmode;
     m_mosTempText = mosVal;
     m_mosTempSlider = mos;
@@ -1059,32 +1347,6 @@ void Widget::buildUi()
     });
     plotRangeSlider->valueChanged(plotRangeSlider->value());
 
-    connect(mode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
-        if (m_modeStack) {
-            m_modeStack->setCurrentIndex(qBound(0, idx, 1));
-        }
-        if (idx != 1) {
-            return;
-        }
-
-        // 切到无感时，清掉有感页中已打开的波形源。
-        for (auto it = m_trendOpenCmd.constBegin(); it != m_trendOpenCmd.constEnd(); ++it) {
-            QPushButton *btn = it.key();
-            if (!btn || !btn->isChecked()) {
-                continue;
-            }
-            btn->blockSignals(true);
-            btn->setChecked(false);
-            btn->blockSignals(false);
-            if (m_serial && m_serial->isConnected()) {
-                m_serial->sendFloatCommand(m_trendCloseCmd.value(btn, -1), 0.0);
-            }
-        }
-        if (m_serial) {
-            m_serial->setProperty("activeTrendCommand", 0);
-        }
-    });
-
     connect(openSerialBtn, &QPushButton::clicked, this, [this, openSerialBtn]() {
         if (!m_serial) {
             return;
@@ -1093,11 +1355,13 @@ void Widget::buildUi()
             m_serial->disconnectPort();
             return;
         }
+        m_serial->refreshPorts();
         const QString port = m_portCombo ? m_portCombo->currentText() : QString();
         const int baud = m_baudCombo ? m_baudCombo->currentText().toInt() : 115200;
         m_serial->connectPort(port, baud);
         openSerialBtn->setText(m_serial->isConnected() ? QStringLiteral("关闭串口") : QStringLiteral("打开串口"));
     });
+    connect(minimizeBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     connect(closeBtn, &QPushButton::clicked, this, &QWidget::close);
     connect(logBtn, &QPushButton::clicked, this, [this]() {
         if (!m_logDialog) {
@@ -1151,7 +1415,27 @@ void Widget::buildUi()
             : static_cast<int>(SerialCommand::CMD_ZEROCALIBRATIO_OVER);
         m_serial->sendFloatCommand(cmd, 0.0);
     });
-    connect(cmode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
+    connect(verifyBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) m_serial->playSystemAlert();
+            showSerialNotOpenTipDialog(this);
+            return;
+        }
+        for (int i = 0; i < 6; ++i) {
+            if (m_verifyLabels[i]) m_verifyLabels[i]->setText(QStringLiteral("..."));
+        }
+        m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_VERIFY_OFFSET), 0.0);
+    });
+    connect(setOffsetBtn, &QPushButton::clicked, this, [this, zeroOffsetEdit]() {
+        if (!m_serial || !m_serial->isConnected()) {
+            if (m_serial) m_serial->playSystemAlert();
+            showSerialNotOpenTipDialog(this);
+            return;
+        }
+        m_serial->sendFloatCommand(static_cast<int>(SerialCommand::CMD_SETELECOFFSET),
+                                   QLocale().toDouble(zeroOffsetEdit->text()));
+    });
+    connect(cmode, qOverload<int>(&QComboBox::activated), this, [this](int idx) {
         if (!m_serial || !m_serial->isConnected()) {
             return;
         }
@@ -1165,6 +1449,8 @@ void Widget::buildUi()
             m_serial->sendFloatCommand(modeCmds[idx], static_cast<double>(idx));
         }
     });
+    // ---- 波形订阅按钮通用信号绑定 ----
+    // 规则：单选互斥（打开新波形自动关闭旧波形）
     for (auto it = m_trendOpenCmd.constBegin(); it != m_trendOpenCmd.constEnd(); ++it) {
         QPushButton *btn = it.key();
         connect(btn, &QPushButton::clicked, this, [this, btn](bool checked) {
@@ -1181,22 +1467,10 @@ void Widget::buildUi()
             const int openCmd = m_trendOpenCmd.value(btn, -1);
             const int closeCmd = m_trendCloseCmd.value(btn, -1);
             if (checked) {
-                for (auto it2 = m_trendOpenCmd.constBegin(); it2 != m_trendOpenCmd.constEnd(); ++it2) {
-                    QPushButton *other = it2.key();
-                    if (other == btn || !other->isChecked()) {
-                        continue;
-                    }
-                    other->blockSignals(true);
-                    other->setChecked(false);
-                    other->blockSignals(false);
-                    m_serial->sendFloatCommand(m_trendCloseCmd.value(other, -1), 0.0);
-                }
                 m_serial->sendFloatCommand(openCmd, 0.0);
-                m_serial->setProperty("activeTrendCommand", openCmd);
             } else {
-                m_serial->sendFloatCommand(closeCmd, 0.0);
-                if (m_serial->property("activeTrendCommand").toInt() == openCmd) {
-                    m_serial->setProperty("activeTrendCommand", 0);
+                if (closeCmd > 0) {
+                    m_serial->sendFloatCommand(closeCmd, 0.0);
                 }
             }
         });
@@ -1253,6 +1527,12 @@ void Widget::buildUi()
     connect(m_serial, &SerialManager::dataReceived, this, [this](const QString &) {
         // 串口日志输出禁用，避免高频 append 造成 UI 卡顿。
     });
+    // ---- 串口帧解析信号处理（核心数据路由） ----
+    // CMD_CONNECT_MOTOR 回包：将下位机当前参数回填到各输入框
+    //   values[0-13]：极对数、方向、零偏值、PID 系数等
+    //   values[14-16]（扩展）：电机 Rs/Lq/Ld，仅回包长度≥17 时回填
+    // CMD_ZEROCALIBRATIO_OVER 回包：回填零偏值和电角度
+    // 其他命令：通过 appendTrendValues 分发到图表曲线
     connect(m_serial, &SerialManager::frameParsed, this, [this, zeroCalibBtn](int command, const QVariantList &values) {
         if (command == static_cast<int>(SerialCommand::CMD_CONNECT_MOTOR) && values.size() >= 14) {
             if (m_polePairsEdit) m_polePairsEdit->setText(formatCompactNumber(values[0].toDouble()));
@@ -1268,6 +1548,11 @@ void Widget::buildUi()
             if (auto *e = m_commandEdits.value(static_cast<int>(SerialCommand::CMD_SETIQPIDOUT))) e->setText(formatCompactNumber(values[11].toDouble()));
             if (auto *e = m_commandEdits.value(static_cast<int>(SerialCommand::CMD_SETSPEEDPIDOUT))) e->setText(formatCompactNumber(values[12].toDouble()));
             if (auto *e = m_commandEdits.value(static_cast<int>(SerialCommand::CMD_SETLOCALPIDOUT))) e->setText(formatCompactNumber(values[13].toDouble()));
+            if (values.size() >= 17) {
+                if (auto *e = m_commandEdits.value(static_cast<int>(SerialCommand::CMD_SETMOTORRS))) e->setText(formatCompactNumber(values[14].toDouble()));
+                if (auto *e = m_commandEdits.value(static_cast<int>(SerialCommand::CMD_SETMOTORLQ))) e->setText(formatCompactNumber(values[15].toDouble()));
+                if (auto *e = m_commandEdits.value(static_cast<int>(SerialCommand::CMD_SETMOTORLD))) e->setText(formatCompactNumber(values[16].toDouble()));
+            }
         } else if (command == static_cast<int>(SerialCommand::CMD_ZEROCALIBRATIO_OVER) && values.size() >= 2) {
             if (m_zeroOffsetEdit) m_zeroOffsetEdit->setText(formatCompactNumber(values[0].toDouble()));
             if (m_elecAngleEdit) m_elecAngleEdit->setText(formatCompactNumber(values[1].toDouble()));
@@ -1276,12 +1561,23 @@ void Widget::buildUi()
                 zeroCalibBtn->setChecked(false);
                 zeroCalibBtn->blockSignals(false);
             }
+        } else if (command == static_cast<int>(SerialCommand::CMD_VERIFY_OFFSET) && values.size() >= 6) {
+            for (int i = 0; i < 6; ++i) {
+                if (m_verifyLabels[i]) {
+                    double deg = values[i].toDouble() * 57.29578;
+                    m_verifyLabels[i]->setText(QString::number(deg, 'f', 1) + QStringLiteral("°"));
+                }
+            }
         }
         appendTrendValues(command, values);
     });
     if (m_serial) {
         m_serial->setRxLogEnabled(false);
         m_serial->refreshPorts();
+        if (m_portCombo) {
+            m_portCombo->clear();
+            m_portCombo->addItems(m_serial->availablePorts());
+        }
     }
 
     // 设置对话框：按参考工程改为同页“设置 + 主题与颜色 + 开发者留言”布局

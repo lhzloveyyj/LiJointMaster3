@@ -1,0 +1,36 @@
+[
+  {
+    "name": "Qt-6.11.0-linux-g++",
+    "isTrusted": true,
+    "preferredGenerator": {
+      "name": "Ninja"
+    },
+    "cmakeSettings": {
+      "QT_QML_GENERATE_QMLLS_INI": "ON",
+      "CMAKE_CXX_FLAGS_DEBUG_INIT": "-DQT_QML_DEBUG -DQT_DECLARATIVE_DEBUG",
+      "CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT": "-DQT_QML_DEBUG -DQT_DECLARATIVE_DEBUG"
+    },
+    "toolchainFile": "/home/lhz/Qt/6.11.0/gcc_64/lib/cmake/Qt6/qt.toolchain.cmake",
+    "environmentVariables": {
+      "VSCODE_QT_QTPATHS_EXE": "/home/lhz/Qt/6.11.0/gcc_64/bin/qtpaths",
+      "PATH": "/home/lhz/Qt/6.11.0/gcc_64:/home/lhz/Qt/6.11.0/gcc_64/doc:/home/lhz/Qt/6.11.0/gcc_64/include:/home/lhz/Qt/6.11.0/gcc_64/lib:/home/lhz/Qt/6.11.0/gcc_64/libexec:/home/lhz/Qt/6.11.0/gcc_64/bin:/home/lhz/Qt/6.11.0/gcc_64/tests:/home/lhz/Qt/6.11.0/gcc_64/plugins:/home/lhz/Qt/6.11.0/gcc_64/qml:/home/lhz/Qt/6.11.0/gcc_64/translations:/home/lhz/Qt/6.11.0/gcc_64/examples:${env:PATH}"
+    }
+  },
+  {
+    "name": "Qt-6.11.0-linux-g++-x86_64",
+    "isTrusted": true,
+    "preferredGenerator": {
+      "name": "Ninja"
+    },
+    "cmakeSettings": {
+      "QT_QML_GENERATE_QMLLS_INI": "ON",
+      "CMAKE_CXX_FLAGS_DEBUG_INIT": "-DQT_QML_DEBUG -DQT_DECLARATIVE_DEBUG",
+      "CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT": "-DQT_QML_DEBUG -DQT_DECLARATIVE_DEBUG"
+    },
+    "toolchainFile": "/home/lhz/Qt/6.11.0/gcc_64/lib/cmake/Qt6/qt.toolchain.cmake",
+    "environmentVariables": {
+      "VSCODE_QT_QTPATHS_EXE": "/home/lhz/Qt/6.11.0/gcc_64/bin/qtpaths",
+      "PATH": "/home/lhz/Qt/6.11.0/gcc_64:/home/lhz/Qt/6.11.0/gcc_64/doc:/home/lhz/Qt/6.11.0/gcc_64/include:/home/lhz/Qt/6.11.0/gcc_64/lib:/home/lhz/Qt/6.11.0/gcc_64/libexec:/home/lhz/Qt/6.11.0/gcc_64/bin:/home/lhz/Qt/6.11.0/gcc_64/tests:/home/lhz/Qt/6.11.0/gcc_64/plugins:/home/lhz/Qt/6.11.0/gcc_64/qml:/home/lhz/Qt/6.11.0/gcc_64/translations:/home/lhz/Qt/6.11.0/gcc_64/examples:x86_64:${env:PATH}"
+    }
+  }
+]

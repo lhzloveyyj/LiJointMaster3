@@ -186,7 +186,9 @@ LiJointMaster3/
 - 设置极对数
 - 设置角度方向
 - 设置速度方向
-- 母线电压输入框
+- 设置电机相电阻 Rs
+- 设置电机 q 轴电感 Lq
+- 设置电机 d 轴电感 Ld
 - MOS 温度显示
 - MOS 温度滑条
 
@@ -210,11 +212,22 @@ LiJointMaster3/
 - 极对数：`CMD_SETPAIRS`
 - 角度方向：`CMD_SETDIR`
 - 速度方向：`CMD_SETSPEEDDIR`
+- 电机相电阻 Rs：`CMD_SETMOTORRS`
+- 电机 q 轴电感 Lq：`CMD_SETMOTORLQ`
+- 电机 d 轴电感 Ld：`CMD_SETMOTORLD`
 
 每一项都由“按钮 + 输入框”组成：
 
 - 输入框用于填写数值
 - 按钮点击后将数值转成 `float` 并通过串口发送
+
+Rs/Lq/Ld 使用 SI 基本单位：
+
+- Rs 单位为 R/Ω，默认值 `0.198`
+- Lq 单位为 H，默认值 `0.000074`，即 `74uH`
+- Ld 单位为 H，默认值 `0.000040`，即 `40uH`
+
+AT32 固件收到这三个命令后会写入 flash，并立即更新后台 SMO 观测器使用的电机参数。其中 SMO 当前使用的等效电感为 `(Lq + Ld) / 2`。
 
 ### 8.3 MOS 温度显示
 
@@ -225,11 +238,11 @@ LiJointMaster3/
 
 这部分是只读显示，不会向下位机写入。
 
-### 8.4 母线电压
+### 8.4 母线 ADC
 
-界面中存在“母线电压”输入框，但当前没有绑定发送命令逻辑，也没有与回包绑定。
+电机配置区不再保留母线电压输入框。
 
-因此该项目前属于界面预留字段。
+波形监控区域的“母线ADC”按钮用于订阅下位机回传的母线电压值。该功能不写入参数，只控制曲线数据流开关。
 
 ## 9. 图表区功能
 
@@ -319,6 +332,7 @@ LiJointMaster3/
 - 电流环输出
 - 速度环输出
 - 位置环输出
+- 母线 ADC 原始值
 
 ### 10.1 单选订阅机制
 
@@ -348,6 +362,7 @@ LiJointMaster3/
 - `CMD_LOCAL / CMD_LOCAL_CLOSE`
 - `CMD_SPEEDOUT / CMD_SPEEDOUT_CLOSE`
 - `CMD_LOCALOUT / CMD_LOCALOUT_CLOSE`
+- `CMD_ADCVBUS / CMD_ADCVBUS_CLOSE`
 
 ### 10.3 图表数据追加规则
 
@@ -365,6 +380,9 @@ LiJointMaster3/
 - 速度环输出 -> `speedOut`
 - 位置 -> `local`
 - 位置环输出 -> `localOut`
+- 母线 ADC 原始值 -> `adcvbus`
+
+`CMD_MOSTEMP` 仍用于 MOS 温度显示；`CMD_ADCVBUS` 独立用于母线电压 ADC 原始值曲线，避免两类数据复用同一个命令字。
 
 ## 11. 零电位校准功能
 
@@ -480,11 +498,20 @@ LiJointMaster3/
 - 零偏值
 - 电流环 PID
 - 速度方向
+- 电机参数 Rs/Lq/Ld
 - 速度环 PID
 - 位置环 PID
 - 各环输出限制
 
 这意味着“连接电机”不仅是连接动作，也承担了参数同步入口。
+
+当前 `CMD_CONNECT_MOTOR` 回包中，Rs/Lq/Ld 位于扩展数据区：
+
+- `values[14]`：Rs，单位 R/Ω
+- `values[15]`：Lq，单位 H
+- `values[16]`：Ld，单位 H
+
+为了兼容旧固件或旧回包，界面仍允许只收到前 14 个参数；只有当回包长度达到 17 个 `float` 时才回填 Rs/Lq/Ld。
 
 ## 15. 设置对话框功能
 
@@ -604,6 +631,9 @@ LiJointMaster3/
 - `CMD_SETDIR`
 - `CMD_ZEROCALIBRATIO`
 - `CMD_ZEROCALIBRATIO_OVER`
+- `CMD_SETMOTORRS`
+- `CMD_SETMOTORLQ`
+- `CMD_SETMOTORLD`
 
 ### 17.2 电压、电流、采样相关
 
@@ -626,6 +656,8 @@ LiJointMaster3/
 - `CMD_SETIQ`
 - `CMD_SETID`
 - `CMD_MOSTEMP`
+- `CMD_ADCVBUS`
+- `CMD_ADCVBUS_CLOSE`
 - `CMD_SETUD`
 
 ### 17.3 控制模式与速度位置控制
@@ -668,6 +700,7 @@ LiJointMaster3/
 - 电机连接状态同步
 - 串口列表同步
 - MOS 温度同步
+- 母线 ADC 原始值曲线同步
 - 连接电机后的参数回填
 - 零电位校准结果回填
 - 图表采样数据实时同步
@@ -740,7 +773,6 @@ LiJointMaster3/
 
 - “无感”模式页仍为预留占位
 - 串口参数下拉框未完全映射到底层打开参数，当前固定按 `8N1`
-- 母线电压输入框仅有界面，未绑定命令
 - 串口日志功能保留但默认停用
 - 图表时间轴步进目前为固定值 `0.0005`
 - 工程当前在本机 Qt/MinGW 环境下构建时，AutoMoc 阶段存在一个未输出详细诊断的构建问题，需后续单独排查
@@ -838,6 +870,200 @@ LiJointMaster3/
 
 - 补全无感模式页
 - 让串口参数下拉真正生效
-- 完善母线电压功能
 - 恢复可控的串口日志系统
 - 解决当前构建环境中的 AutoMoc 异常
+
+---
+
+## 附录 A：源码注释与文档约定
+
+本项目的源码已添加详细的中文 Doxygen 风格注释。注释约定如下：
+
+### A.1 文件头注释
+
+每个源文件（`.h` / `.cpp`）以 `@file` 标记开头，说明该文件的职责和核心功能：
+
+```cpp
+/**
+ * @file serialmanager.cpp
+ * @brief 串口管理器实现
+ *
+ * 实现串口枚举、连接管理、协议编解码的核心逻辑。
+ * ...
+ */
+```
+
+### A.2 类注释
+
+类声明前用 `@brief` 描述类的职责：
+
+```cpp
+/**
+ * @brief 串口管理器
+ *
+ * 核心职责：
+ * 1. 串口热插拔检测（300ms 定时器轮询）
+ * 2. 串口打开/关闭（固定 8N1 无流控）
+ * ...
+ */
+class SerialManager : public QObject
+```
+
+### A.3 函数注释
+
+公共接口和复杂函数前标注功能、参数和返回值：
+
+```cpp
+/**
+ * @brief 发送浮点命令帧（核心发送接口）
+ *
+ * 构造固定 8 字节的命令帧并写入串口
+ * @param command 命令字（0-255）
+ * @param value   伴随的 float 参数值
+ * @return true 发送成功
+ */
+bool sendFloatCommand(int command, double value);
+```
+
+### A.4 成员变量注释
+
+成员变量使用行尾注释：
+
+```cpp
+QByteArray m_rxBuffer;             ///< 接收数据缓冲区
+QTimer *m_portWatchTimer;          ///< 串口热插拔轮询定时器
+```
+
+### A.5 代码段注释
+
+关键逻辑段使用 `// ----` 分隔线和大段注释：
+
+```cpp
+// ============================================================================
+// buildUi —— 核心 UI 构建函数
+// ============================================================================
+```
+
+---
+
+## 附录 B：数据流与信号链
+
+本附录描述数据从物理串口到 UI 显示或控制命令发送的完整路径。
+
+### B.1 上行数据流（接收：MCU → 上位机）
+
+```
+[MCU 串口发送]
+      ↓
+QSerialPort::readyRead
+      ↓
+SerialManager::readSerialData()     // 读取全部可用字节
+      ↓
+m_rxBuffer.append(bytes)            // 拼接到接收缓冲区
+      ↓
+SerialManager::parseRxBuffer()       // 循环解析完整帧
+      ↓
+SerialManager::tryParseOneFrame()    // 验证帧头/帧尾/校验和，提取 float 数组
+      ↓
+emit frameParsed(cmd, values)        // 发射解析信号
+      ↓
+Widget 中 frameParsed 信号槽:
+  ├── CMD_CONNECT_MOTOR     → 参数回填（极对数/PID 系数/Rs/Lq/Ld 等）
+  ├── CMD_ZEROCALIBRATIO_OVER → 零偏值 + 电角度回填
+  ├── CMD_MOSTEMP           → MOS 温度文本 + 滑条更新
+  └── 其他波形命令          → appendTrendValues() → PlotManager::appendData()
+```
+
+### B.2 下行数据流（发送：上位机 → MCU）
+
+```
+用户操作界面控件
+      ↓
+信号槽触发 → m_serial->sendFloatCommand(cmd, value)
+      ↓
+构造 8 字节帧: [0xA5][CMD][4B float LE][校验和][0x49]
+      ↓
+QSerialPort::write(frame)
+      ↓
+[MCU 串口接收并解析执行]
+```
+
+### B.3 热插拔检测流程
+
+```
+m_portWatchTimer (300ms)
+      ↓
+SerialManager::updateAvailablePorts()
+      ↓
+QSerialPortInfo::availablePorts() + /dev/ttyUSB* 扫描
+      ↓
+检查已连接串口是否仍在列表中
+  ├── 不在 → 自动 close + 状态复位（电机/温度/波形）
+  └── 在   → 检查列表是否变化，更新 UI
+```
+
+---
+
+## 附录 C：类图与依赖关系
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Widget (主窗口)                       │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                     buildUi()                         │  │
+│  │  ┌──────────┐  ┌──────────────────┐  ┌───────────┐  │  │
+│  │  │ 左侧面板  │  │    图表区        │  │ 底部调试台 │  │  │
+│  │  │ 串口配置  │  │ QCustomPlot     │  │ 零位/控制 │  │  │
+│  │  │ 电机参数  │  │ PlotManager     │  │ PID/目标  │  │  │
+│  │  └──────────┘  └──────────────────┘  └───────────┘  │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                          │                                  │
+│                    ┌─────┴──────┐                          │
+│                    │ SerialManager                         │
+│                    │  串口通信 + 协议解析                    │
+│                    │  sendFloatCommand()                   │
+│                    │  tryParseOneFrame()                   │
+│                    │  frameParsed 信号                      │
+│                    └────────────┘                          │
+│                          │                                  │
+│                    QSerialPort                               │
+│                    [AT32 MCU]                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 附录 D：构建说明
+
+### D.1 环境要求
+
+| 依赖 | 版本要求 |
+|------|---------|
+| CMake | ≥ 3.16 |
+| C++ 编译器 | 支持 C++17 |
+| Qt | Qt 5.15+ 或 Qt 6.x |
+| Qt SerialPort | 可选（无此模块时串口功能禁用） |
+
+### D.2 构建步骤
+
+```bash
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+
+### D.3 CMake 选项
+
+| 选项 | 说明 |
+|------|------|
+| `LIJOINT_HAS_SERIALPORT` | 自动检测，有 SerialPort 模块时为 `ON` |
+| MinGW 特殊处理 | 启用 `-Wa,-mbig-obj` 避免大目标文件错误 |
+
+---
+
+## 附录 E：版本历史
+
+| 日期 | 版本 | 说明 |
+|------|------|------|
+| 2025-12-02 | 1.0 | 初始版本，有感 FOC 调试功能完整实现 |
+| 2026-xx-xx | 1.1 | 增加 SMO 无感观测调试页（预留）、完善代码注释和文档 |

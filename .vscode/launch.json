@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "LiJointMaster3 Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/vscode-linux-debug/LiJointMaster3",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "QT_QPA_PLATFORM",
+                    "value": "xcb"
+                }
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "cmake-build-debug",
+            "visualizerFile": "/home/lhz/.config/Code/User/workspaceStorage/ce6a08220945386988e2649c254e4223/tonka3000.qtvsctools/qt.natvis.xml"
+        }
+    ]
+}
